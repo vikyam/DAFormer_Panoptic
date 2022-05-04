@@ -1,0 +1,63 @@
+{
+    "_base_": [
+        "../../_base_/default_runtime.py",
+        "../../_base_/models/upernet_ch256_mit.py",
+        "../../_base_/datasets/cityscapes_half_512x512.py",
+        "../../_base_/schedules/adamw.py",
+        "../../_base_/schedules/poly10warm.py"
+    ],
+    "n_gpus": 1,
+    "seed": 0,
+    "model": {
+        "pretrained": "pretrained/mit_b5.pth",
+        "backbone": {
+            "type": "mit_b5"
+        },
+        "decode_head": {}
+    },
+    "data": {
+        "samples_per_gpu": 2,
+        "workers_per_gpu": 4,
+        "train": {}
+    },
+    "optimizer": {
+        "lr": 6e-05,
+        "paramwise_cfg": {
+            "custom_keys": {
+                "head": {
+                    "lr_mult": 10.0
+                },
+                "pos_block": {
+                    "decay_mult": 0.0
+                },
+                "norm": {
+                    "decay_mult": 0.0
+                }
+            }
+        }
+    },
+    "runner": {
+        "type": "IterBasedRunner",
+        "max_iters": 2
+    },
+    "checkpoint_config": {
+        "by_epoch": false,
+        "interval": 2,
+        "max_keep_ckpts": 1
+    },
+    "evaluation": {
+        "interval": 100,
+        "metric": "mIoU"
+    },
+    "name": "220428_1707_cs2cs_target-only_upernet_ch256_mitb5_poly10warm_s0_b5e65",
+    "exp": 100,
+    "name_dataset": "cityscapes2cityscapes",
+    "name_architecture": "upernet_ch256_mitb5",
+    "name_encoder": "mitb5",
+    "name_decoder": "upernet_ch256",
+    "name_uda": "target-only",
+    "name_opt": "adamw_6e-05_pmTrue_poly10warm_1x2_0k",
+    "log_level": 40,
+    "work_dir": "work_dirs/local-exp100/220428_1707_cs2cs_target-only_upernet_ch256_mitb5_poly10warm_s0_b5e65",
+    "git_rev": "64aae94f02e64fd004299c00e9a88095f21898fc"
+}
