@@ -1,12 +1,12 @@
 # dataset settings
 dataset_type = 'CityscapesDataset'
-data_root = 'data/cityscapes/'
+data_root = '/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/cityscapes/'
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 crop_size = (512, 512)
 synthia_train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotations'),
+    dict(type='LoadAnnotationsPanoptic'),
     dict(type='Resize', img_scale=(1280, 760)),
     dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
     dict(type='RandomFlip', prob=0.5),
@@ -18,7 +18,7 @@ synthia_train_pipeline = [
 ]
 cityscapes_train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotations'),
+    dict(type='LoadAnnotationsPanoptic'),
     dict(type='Resize', img_scale=(1024, 512)),
     dict(type='RandomCrop', crop_size=crop_size),
     dict(type='RandomFlip', prob=0.5),
@@ -52,25 +52,25 @@ data = dict(
         type='UDADataset',
         source=dict(
             type='SynthiaDataset',
-            data_root='data/synthia/',
-            img_dir='panoptic_gt',
-            ann_dir='panoptic_labels',
+            data_root='/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/synthia/',
+            img_dir='RGB',
+            ann_dir='panoptic-labels-crowdth-0-for-daformer',
             pipeline=synthia_train_pipeline),
         target=dict(
             type='CityscapesDataset',
-            data_root='data/cityscapes/',
-            img_dir='leftImg8bit_panoptic/train',
-            ann_dir='panoptic_labels',
+            data_root='/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/cityscapes/',
+            img_dir='leftImg8bit/train',
+            ann_dir='gtFine_panoptic/cityscapes_panoptic_train_trainId',
             pipeline=cityscapes_train_pipeline)),
     val=dict(
         type='CityscapesDataset',
-        data_root='data/cityscapes/',
+        data_root='/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/cityscapes/',
         img_dir='leftImg8bit/val',
-        ann_dir='panoptic_labels',
+        ann_dir='gtFine_panoptic/cityscapes_panoptic_val',
         pipeline=test_pipeline),
     test=dict(
         type='CityscapesDataset',
-        data_root='data/cityscapes/',
+        data_root='/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/cityscapes/',
         img_dir='leftImg8bit/val',
-        ann_dir='gtFine/val',
+        ann_dir='gtFine_panoptic/cityscapes_panoptic_val',
         pipeline=test_pipeline))

@@ -14,6 +14,6 @@ class SynthiaDataset(CustomDataset):
             kwargs.pop('split')
         super(SynthiaDataset, self).__init__(
             img_suffix='.png',
-            seg_map_suffix='_labelTrainIds.png',
+            seg_map_suffix='_panoptic.png',
             split=None,
             **kwargs)
