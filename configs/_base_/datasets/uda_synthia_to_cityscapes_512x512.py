@@ -6,19 +6,19 @@ img_norm_cfg = dict(
 crop_size = (512, 512)
 synthia_train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotationsPanoptic'),
-    dict(type='Resize', img_scale=(1280, 760)),
+    dict(type='LoadAnnotationsPanopticSynthia'),
+    dict(type='Resize', img_scale=(1280, 720)),
     dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
     dict(type='RandomFlip', prob=0.5),
     # dict(type='PhotoMetricDistortion'),  # is applied later in dacs.py
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'pan_gt', 'instance_data']),
+    dict(type='Collect', keys=['img', 'gt_pan_data', 'gt_semantic_seg']),
 ]
 cityscapes_train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotationsPanoptic'),
+    dict(type='LoadAnnotationsPanopticCity'),
     dict(type='Resize', img_scale=(1024, 512)),
     dict(type='RandomCrop', crop_size=crop_size),
     dict(type='RandomFlip', prob=0.5),
@@ -26,7 +26,7 @@ cityscapes_train_pipeline = [
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'pan_gt', 'instance_data']),
+    dict(type='Collect', keys=['img', 'gt_pan_data', 'gt_semantic_seg']),
 ]
 test_pipeline = [
     dict(type='LoadImageFromFile'),
@@ -55,12 +55,16 @@ data = dict(
             data_root='/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/synthia/',
             img_dir='RGB',
             ann_dir='panoptic-labels-crowdth-0-for-daformer',
+            aux_dir='synthia_panoptic',
+            dict_dir='synthia_panoptic.json',
             pipeline=synthia_train_pipeline),
         target=dict(
             type='CityscapesDataset',
             data_root='/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/cityscapes/',
             img_dir='leftImg8bit/train',
-            ann_dir='gtFine_panoptic/cityscapes_panoptic_train_trainId',
+            ann_dir='gtFine_panoptic',
+            aux_dir='cityscapes_panoptic_train_trainId',
+            dict_dir='cityscapes_panoptic_train_trainId.json',
             pipeline=cityscapes_train_pipeline)),
     val=dict(
         type='CityscapesDataset',

@@ -211,12 +211,6 @@ class DefaultFormatBundle(object):
                 to_tensor(results['gt_semantic_seg'][None,
                                                      ...].astype(np.int64)),
                 stack=True)
-        if 'pan_gt' in results:
-            # convert to long
-            results['pan_gt'] = DC(
-                to_tensor(results['pan_gt'][None,
-                                                     ...].astype(np.int64)),
-                stack=True)
         return results
 
     def __repr__(self):

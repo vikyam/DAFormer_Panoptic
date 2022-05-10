@@ -183,7 +183,7 @@ class DACSPANOPTIC(UDADecorator):
         feat_log.pop('loss', None)
         return feat_loss, feat_log
 
-    def forward_train(self, img, img_metas, gt_semantic_seg, target_img,
+    def forward_train(self, img, img_metas, gt_pan_data, gt_semantic_seg, target_img,
                       target_img_metas):
         """Forward function for training.
 
@@ -203,6 +203,7 @@ class DACSPANOPTIC(UDADecorator):
 
         img = img.data[0]
         img_metas = img_metas.data[0]
+        pan_gt = gt_pan_data
         gt_semantic_seg = gt_semantic_seg.data[0]
         target_img = target_img.data[0]
         target_img_metas = target_img_metas.data[0]
@@ -234,7 +235,7 @@ class DACSPANOPTIC(UDADecorator):
 
         # Train on source images
         clean_losses = self.get_model().forward_train(
-            img, img_metas, gt_semantic_seg, return_feat=True)
+            img, img_metas, pan_gt, gt_semantic_seg, return_feat=True)
         src_feat = clean_losses.pop('features')
         # Change this for panoptic
         clean_loss, clean_log_vars = self._parse_losses_panoptic(clean_losses)

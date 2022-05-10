@@ -23,8 +23,7 @@ class EncoderMultiDecoder(BaseSegmentor):
 
     def __init__(self,
                  backbone,
-                 decode_head_semantic,
-                 decode_head_instance,
+                 decode_head,
                  neck=None,
                  auxiliary_head=None,
                  train_cfg=None,
@@ -90,6 +89,7 @@ class EncoderMultiDecoder(BaseSegmentor):
     def _decode_head_forward_train(self,
                                    x,
                                    img_metas,
+                                   gt_pan_data,
                                    gt_semantic_seg,
                                    seg_weight=None):
         """Run forward function and calculate loss for decode head in
@@ -99,7 +99,7 @@ class EncoderMultiDecoder(BaseSegmentor):
                                                      gt_semantic_seg,
                                                      self.train_cfg,
                                                      seg_weight)
-        loss_decode_instance = self.decode_head_instance.forward_train(x, img_metas,
+        loss_decode_instance = self.decode_head_instance.forward_train(x, img_metas, gt_pan_data,
                                                      gt_semantic_seg,
                                                      self.train_cfg,
                                                      seg_weight)
@@ -146,6 +146,7 @@ class EncoderMultiDecoder(BaseSegmentor):
     def forward_train(self,
                       img,
                       img_metas,
+                      gt_pan_data,
                       gt_semantic_seg,
                       seg_weight=None,
                       return_feat=False):
@@ -170,7 +171,7 @@ class EncoderMultiDecoder(BaseSegmentor):
         if return_feat:
             losses['features'] = x
 
-        loss_decode = self._decode_head_forward_train(x, img_metas,
+        loss_decode = self._decode_head_forward_train(x, img_metas, gt_pan_data,
                                                       gt_semantic_seg,
                                                       seg_weight)
                                 

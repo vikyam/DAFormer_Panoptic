@@ -81,6 +81,8 @@ class CustomDataset(Dataset):
                  img_dir,
                  img_suffix='.jpg',
                  ann_dir=None,
+                 aux_dir=None,
+                 dict_dir=None,
                  seg_map_suffix='.png',
                  split=None,
                  data_root=None,
@@ -93,6 +95,8 @@ class CustomDataset(Dataset):
         self.img_dir = img_dir
         self.img_suffix = img_suffix
         self.ann_dir = ann_dir
+        self.aux_dir = aux_dir
+        self.dict_dir = dict_dir
         self.seg_map_suffix = seg_map_suffix
         self.split = split
         self.data_root = data_root
@@ -114,14 +118,14 @@ class CustomDataset(Dataset):
 
         # load annotations
         self.img_infos = self.load_annotations(self.img_dir, self.img_suffix,
-                                               self.ann_dir,
+                                               self.ann_dir, self.aux_dir,
                                                self.seg_map_suffix, self.split)
 
     def __len__(self):
         """Total number of samples of data."""
         return len(self.img_infos)
 
-    def load_annotations(self, img_dir, img_suffix, ann_dir, seg_map_suffix,
+    def load_annotations(self, img_dir, img_suffix, ann_dir, aux_dir, seg_map_suffix,
                          split):
         """Load annotation from directory.
 
@@ -178,7 +182,9 @@ class CustomDataset(Dataset):
         results['seg_fields'] = []
         results['img_prefix'] = self.img_dir
         results['seg_prefix'] = self.ann_dir
-        results['pan_prefix'] = self.ann_dir
+        results['pan_prefix'] = self.ann_dir 
+        results['aux_prefix'] = self.aux_dir
+        results['dict_dir'] = self.dict_dir
         if self.custom_classes:
             results['label_map'] = self.label_map
 

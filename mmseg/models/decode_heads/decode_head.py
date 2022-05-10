@@ -57,14 +57,18 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                  act_cfg=dict(type='ReLU'),
                  in_index=-1,
                  input_transform=None,
-                 loss_decode=dict(
+                 loss_decode_sem=dict(
                      type='CrossEntropyLoss',
                      use_sigmoid=False,
                      loss_weight=1.0),
+                 loss_decode_centre,
+                 loss_decode_offset,
                  decoder_params=None,
                  ignore_index=255,
                  sampler=None,
                  align_corners=False,
+                 center_loss=False,
+                 offset_loss=False,
                  init_cfg=dict(
                      type='Normal', std=0.01, override=dict(name='conv_seg'))):
         super(BaseDecodeHead, self).__init__(init_cfg)
@@ -76,9 +80,13 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         self.norm_cfg = norm_cfg
         self.act_cfg = act_cfg
         self.in_index = in_index
-        self.loss_decode = build_loss(loss_decode)
+        self.loss_decode_sem = build_loss(loss_decode_sem)
+        self.loss_decode_centre = build_loss(loss_decode_centre)
+        self.loss_decode_offset = build_loss(loss_decode_offset)
         self.ignore_index = ignore_index
         self.align_corners = align_corners
+        self.center_loss = center_loss
+        self.offset_loss = offset_loss
         if sampler is not None:
             self.sampler = build_pixel_sampler(sampler, context=self)
         else:
@@ -172,8 +180,10 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
     def forward_train(self,
                       inputs,
                       img_metas,
+                      gt_pan_data,
                       gt_semantic_seg,
                       train_cfg,
+                      flag='semantic',
                       seg_weight=None):
         """Forward function for training.
         Args:
@@ -190,8 +200,8 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        seg_logits = self.forward(inputs)
-        losses = self.losses(seg_logits, gt_semantic_seg, seg_weight)
+        results = self.forward(inputs)
+        losses = self.losses(results, gt_pan_data, gt_semantic_seg, seg_weight)
         return losses
 
     def forward_test(self, inputs, img_metas, test_cfg):
@@ -218,22 +228,50 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         output = self.conv_seg(feat)
         return output
 
-    @force_fp32(apply_to=('seg_logit', ))
-    def losses(self, seg_logit, seg_label, seg_weight=None):
-        """Compute segmentation loss."""
+    @force_fp32(apply_to=('results', ))
+    def losses(self, results, seg_label, seg_weight=None):
+        """Compute all losses here."""
         loss = dict()
-        seg_logit = resize(
-            input=seg_logit,
+        results = resize(
+            input=results,
             size=seg_label.shape[2:],
             mode='bilinear',
             align_corners=self.align_corners)
         if self.sampler is not None:
-            seg_weight = self.sampler.sample(seg_logit, seg_label)
+            seg_weight = self.sampler.sample(results, seg_label)
         seg_label = seg_label.squeeze(1)
         loss['loss_seg'] = self.loss_decode(
-            seg_logit,
+            results,
             seg_label,
             weight=seg_weight,
             ignore_index=self.ignore_index)
-        loss['acc_seg'] = accuracy(seg_logit, seg_label)
+        loss['acc_seg'] = accuracy(results, seg_label)
+
+        batch_size = results['semantic'].size(0)
+        loss = 0
+        if seg_label is not None:
+            semantic_loss = self.loss_decode_sem(
+                    results['semantic'], seg_label, weight=seg_weight, ignore_index=self.ignore_index)
+            loss['loss_seg'] = semantic_loss
+            if self.center_loss is not None:
+                # Pixel-wise loss weight
+                center_loss_weights = targets['center_weights'][:, None, :, :].expand_as(results['center'])
+                center_loss = self.loss_decode_centre(results['center'], targets['center']) * center_loss_weights
+                # safe division
+                if center_loss_weights.sum() > 0:
+                    center_loss = center_loss.sum() / center_loss_weights.sum() * self.center_loss_weight
+                else:
+                    center_loss = center_loss.sum() * 0
+                loss['loss_center'] = center_loss
+            if self.offset_loss is not None:
+                # Pixel-wise loss weight
+                offset_loss_weights = targets['offset_weights'][:, None, :, :].expand_as(results['offset'])
+                offset_loss = self.loss_decode_offset(results['offset'], targets['offset']) * offset_loss_weights
+                # safe division
+                if offset_loss_weights.sum() > 0:
+                    offset_loss = offset_loss.sum() / offset_loss_weights.sum() * self.offset_loss_weight
+                else:
+                    offset_loss = offset_loss.sum() * 0
+                loss['loss_offset'] = offset_loss
+        
         return loss

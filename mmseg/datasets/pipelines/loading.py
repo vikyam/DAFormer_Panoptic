@@ -9,14 +9,23 @@ import imageio.v2 as imageio
 from PIL import Image
 
 from ..builder import PIPELINES
+from .transforms import PanopticTargetGenerator
+from .utils import DatasetDescriptor
 
-def rgb2id(color):
-    if isinstance(color, np.ndarray) and len(color.shape) == 3:
-        if color.dtype == np.uint8:
-            color = color.astype(np.int32)
-        return color[:, :, 0] + 256 * color[:, :, 1] + 256 * 256 * color[:, :, 2]
-    return int(color[0] + 256 * color[1] + 256 * 256 * color[2])
+_CITYSCAPES_INFORMATION = DatasetDescriptor(
+    splits_to_sizes={'train': 2975,
+                     'trainval': 3475,
+                     'val': 500,
+                     'test': 1525},
+    num_classes=19,
+    ignore_label=255,
+)
 
+# Add 1 void label.
+_CITYSCAPES_PANOPTIC_TRAIN_ID_TO_EVAL_ID = [7, 8, 11, 12, 13, 17, 19, 20, 21, 22,
+                                            23, 24, 25, 26, 27, 28, 31, 32, 33, 0]
+
+_CITYSCAPES_THING_LIST = [11, 12, 13, 14, 15, 16, 17, 18]
 
 @PIPELINES.register_module()
 class LoadImageFromFile(object):
@@ -166,47 +175,133 @@ class LoadAnnotations(object):
         return repr_str
 
 @PIPELINES.register_module()
-class LoadAnnotationsPanoptic(object):
-    def __init__(self, reduce_zero_label=False,
-                 file_client_args=dict(backend='disk'),
-                 imdecode_backend='pillow'):
-        self.reduce_zero_label = reduce_zero_label
-        self.file_client_args = file_client_args.copy()
-        self.file_client = None
-        self.imdecode_backend = imdecode_backend
-    
-    def __call__(self, results):
-        if self.file_client is None:
-            self.file_client = mmcv.FileClient(**self.file_client_args)
-        if results.get('pan_prefix', None) is not None:
-            filename = osp.join(results['pan_prefix'],'synthia_panoptic',
-                                results['ann_info']['seg_map'])
-            dict_filename = osp.join(results['pan_prefix'],
-                                'synthia_panoptic.json')
-        else:
-            filename = results['ann_info']['seg_map']
+class LoadAnnotationsPanopticSynthia(object):
+    def __init__(self, ignore_stuff_in_offset=False,
+                 small_instance_area=0,
+                 small_instance_weight=1,):
+        self.num_classes = _CITYSCAPES_INFORMATION.num_classes
+        self.ignore_label = _CITYSCAPES_INFORMATION.ignore_label
+        self.label_dtype = np.float32
+        self.thing_list = _CITYSCAPES_THING_LIST
 
+        # Initialize the panoptic target generator
+        self.target_transform = PanopticTargetGenerator(self.ignore_label, self.rgb2id, _CITYSCAPES_THING_LIST,
+                                                            sigma=8, ignore_stuff_in_offset=ignore_stuff_in_offset,
+                                                            small_instance_area=small_instance_area,
+                                                            small_instance_weight=small_instance_weight)
+        
+    def __call__(self, results):
+
+        if results['aux_prefix']:
+            filename = osp.join(results['pan_prefix'], results['aux_prefix'],
+                                results['ann_info']['seg_map'])
+        else:
+            filename = osp.join(results['pan_prefix'],
+                                results['ann_info']['seg_map'])
+        dict_filename = osp.join(results['pan_prefix'],
+                                results['dict_dir'])
+        
         # Load panoptic gt image
         pan_gt = Image.open(filename)
         pan_gt = np.array(pan_gt, dtype=np.uint32)
-        pan_gt = rgb2id(pan_gt)
-        results['pan_gt'] = pan_gt
-        results['seg_fields'].append('pan_gt')
 
         with open(dict_filename) as instance_dict:
             instance_data_full = json.load(instance_dict)
         
         img_no = int(results['img_info']['filename'].split('.')[0])
         instance_data = instance_data_full['annotations'][img_no]
-        results['instance_data'] = instance_data
+        instance_data = instance_data['segments_info']
+        results['gt_pan_data'] = self.target_transform(pan_gt, instance_data)
+        results['gt_semantic_seg'] = np.array(results['gt_pan_data']['semantic'])
+        results['seg_fields'].append('gt_semantic_seg')
         
         return results
     
-    def __repr__(self):
-        repr_str = self.__class__.__name__
-        repr_str += f'(reduce_zero_label={self.reduce_zero_label},'
-        repr_str += f"imdecode_backend='{self.imdecode_backend}')"
-        return repr_str
+    @staticmethod
+    def train_id_to_eval_id():
+        return _CITYSCAPES_PANOPTIC_TRAIN_ID_TO_EVAL_ID
+    
+    @staticmethod
+    def rgb2id(color):
+        """Converts the color to panoptic label.
+        Color is created by `color = [segmentId % 256, segmentId // 256, segmentId // 256 // 256]`.
+        Args:
+            color: Ndarray or a tuple, color encoded image.
+        Returns:
+            Panoptic label.
+        """
+        if isinstance(color, np.ndarray) and len(color.shape) == 3:
+            if color.dtype == np.uint8:
+                color = color.astype(np.int32)
+            return color[:, :, 0] + 256 * color[:, :, 1] + 256 * 256 * color[:, :, 2]
+        return int(color[0] + 256 * color[1] + 256 * 256 * color[2])
+
+@PIPELINES.register_module()
+class LoadAnnotationsPanopticCity(object):
+    def __init__(self, ignore_stuff_in_offset=False,
+                 small_instance_area=0,
+                 small_instance_weight=1,):
+        self.num_classes = _CITYSCAPES_INFORMATION.num_classes
+        self.ignore_label = _CITYSCAPES_INFORMATION.ignore_label
+        self.label_dtype = np.float32
+        self.thing_list = _CITYSCAPES_THING_LIST
+
+        # Initialize the panoptic target generator
+        self.target_transform = PanopticTargetGenerator(self.ignore_label, self.rgb2id, _CITYSCAPES_THING_LIST,
+                                                            sigma=8, ignore_stuff_in_offset=ignore_stuff_in_offset,
+                                                            small_instance_area=small_instance_area,
+                                                            small_instance_weight=small_instance_weight)
+        
+    def __call__(self, results):
+
+        if results['aux_prefix']:
+            filename = osp.join(results['pan_prefix'], results['aux_prefix'],
+                                results['ann_info']['seg_map'])
+        else:
+            filename = osp.join(results['pan_prefix'],
+                                results['ann_info']['seg_map'])
+        dict_filename = osp.join(results['pan_prefix'],
+                                results['dict_dir'])
+        
+        # Load panoptic gt image
+        pan_gt = Image.open(filename)
+        pan_gt = np.array(pan_gt, dtype=np.uint32)
+
+        with open(dict_filename) as instance_dict:
+            instance_data_full = json.load(instance_dict)
+        
+        img_id = results['img_info']['filename'].split('/')[1]
+
+        for idx, data in enumerate(instance_data_full['annotations']):
+            if data['file_name'] == img_id:
+                break
+        
+        instance_data = instance_data_full['annotations'][idx]
+        instance_data = instance_data['segments_info']
+        results['gt_pan_data'] = self.target_transform(pan_gt, instance_data)
+        results['gt_semantic_seg'] = np.array(results['gt_pan_data']['semantic'])
+        results['seg_fields'].append('gt_semantic_seg')
+        
+        return results
+    
+    @staticmethod
+    def train_id_to_eval_id():
+        return _CITYSCAPES_PANOPTIC_TRAIN_ID_TO_EVAL_ID
+    
+    @staticmethod
+    def rgb2id(color):
+        """Converts the color to panoptic label.
+        Color is created by `color = [segmentId % 256, segmentId // 256, segmentId // 256 // 256]`.
+        Args:
+            color: Ndarray or a tuple, color encoded image.
+        Returns:
+            Panoptic label.
+        """
+        if isinstance(color, np.ndarray) and len(color.shape) == 3:
+            if color.dtype == np.uint8:
+                color = color.astype(np.int32)
+            return color[:, :, 0] + 256 * color[:, :, 1] + 256 * 256 * color[:, :, 2]
+        return int(color[0] + 256 * color[1] + 256 * 256 * color[2])
 
         
         
