@@ -4,7 +4,7 @@ _base_ = ['daformer_panoptic_conv1_mitb5.py']
 
 norm_cfg = dict(type='BN', requires_grad=True)
 model = dict(
-    decode_head_semantic=dict(
+    decode_head=dict(
         decoder_params=dict(
             fusion_cfg=dict(
                 _delete_=True,

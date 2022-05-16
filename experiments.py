@@ -147,7 +147,7 @@ def generate_experiment_cfgs(id):
             cfg['model']['decode_head']['norm_cfg'] = None
         
         if 'panoptic' in architecture_mod:
-            cfg = update_decoder_in_channels_panoptic(cfg, architecture_mod, backbone)
+            cfg = update_decoder_in_channels(cfg, architecture_mod, backbone)
         else:
             cfg = update_decoder_in_channels(cfg, architecture_mod, backbone)
 
@@ -222,7 +222,7 @@ def generate_experiment_cfgs(id):
     # -------------------------------------------------------------------------
     cfgs = []
     n_gpus = 1
-    batch_size = 2
+    batch_size = 1
     iters = 40000
     opt, lr, schedule, pmult = 'adamw', 0.00006, 'poly10warm', True
     crop = '512x512'

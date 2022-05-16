@@ -90,7 +90,7 @@ class UDADataset(object):
         s1 = self.source[i1]
         if self.rcs_min_crop_ratio > 0:
             for j in range(10):
-                n_class = torch.sum(s1['gt_semantic_seg'].data == c)
+                n_class = torch.sum(s1['gt_pan_data']['semantic'].data == c)
                 # mmcv.print_log(f'{j}: {n_class}', 'mmseg')
                 if n_class > self.rcs_min_pixels * self.rcs_min_crop_ratio:
                     break

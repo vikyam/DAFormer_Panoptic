@@ -84,24 +84,23 @@ class EncoderDecoder(BaseSegmentor):
     def _decode_head_forward_train(self,
                                    x,
                                    img_metas,
-                                   gt_semantic_seg,
+                                   pan_gt, 
                                    seg_weight=None):
         """Run forward function and calculate loss for decode head in
         training."""
         losses = dict()
-        loss_decode = self.decode_head.forward_train(x, img_metas,
-                                                     gt_semantic_seg,
+        loss_decode, network_output = self.decode_head.forward_train(x, img_metas, pan_gt, 
                                                      self.train_cfg,
                                                      seg_weight)
 
         losses.update(add_prefix(loss_decode, 'decode'))
-        return losses
+        return losses, network_output
 
     def _decode_head_forward_test(self, x, img_metas):
         """Run forward function and calculate loss for decode head in
         inference."""
         seg_logits = self.decode_head.forward_test(x, img_metas, self.test_cfg)
-        return seg_logits
+        return seg_logits['semantic']
 
     def _auxiliary_head_forward_train(self,
                                       x,
@@ -133,7 +132,7 @@ class EncoderDecoder(BaseSegmentor):
     def forward_train(self,
                       img,
                       img_metas,
-                      gt_semantic_seg,
+                      pan_gt,
                       seg_weight=None,
                       return_feat=False):
         """Forward function for training.
@@ -157,17 +156,16 @@ class EncoderDecoder(BaseSegmentor):
         if return_feat:
             losses['features'] = x
 
-        loss_decode = self._decode_head_forward_train(x, img_metas,
-                                                      gt_semantic_seg,
+        loss_decode, network_output = self._decode_head_forward_train(x, img_metas, pan_gt, 
                                                       seg_weight)
         losses.update(loss_decode)
 
         if self.with_auxiliary_head:
             loss_aux = self._auxiliary_head_forward_train(
-                x, img_metas, gt_semantic_seg, seg_weight)
+                x, img_metas, seg_weight)
             losses.update(loss_aux)
 
-        return losses
+        return losses, network_output
 
     # TODO refactor
     def slide_inference(self, img, img_meta, rescale):

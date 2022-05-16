@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from collections import OrderedDict
 from mmcv.cnn import ConvModule, DepthwiseSeparableConvModule
 
 from mmseg.models.decode_heads.isa_head import ISALayer
@@ -7,8 +8,40 @@ from mmseg.ops import resize
 from ..builder import HEADS
 from .aspp_head import ASPPModule
 from .decode_head import BaseDecodeHead
+from functools import partial
 from .segformer_head import MLP
 from .sep_aspp_head import DepthwiseSeparableASPPModule
+from .conv_module import stacked_conv
+
+
+class SinglePanopticDeepLabHead(nn.Module):
+    def __init__(self, decoder_channels, head_channels, num_classes, class_key):
+        super(SinglePanopticDeepLabHead, self).__init__()
+        fuse_conv = partial(stacked_conv, kernel_size=5, num_stack=1, padding=2,
+                            conv_type='depthwise_separable_conv')
+
+        self.num_head = len(num_classes)
+        assert self.num_head == len(class_key)
+
+        classifier = {}
+        for i in range(self.num_head):
+            classifier[class_key[i]] = nn.Sequential(
+                fuse_conv(
+                    decoder_channels,
+                    head_channels,
+                ),
+                nn.Conv2d(head_channels, num_classes[i], 1)
+            )
+        self.classifier = nn.ModuleDict(classifier)
+        self.class_key = class_key
+
+    def forward(self, x):
+        pred = OrderedDict()
+        # build classifier
+        for key in self.class_key:
+            pred[key] = self.classifier[key](x)
+
+        return pred
 
 
 class ASPPWrapper(nn.Module):
@@ -149,21 +182,31 @@ class DAFormerHead(BaseDecodeHead):
 
         self.fuse_layer = build_layer(
             sum(embed_dims), self.channels, **fusion_cfg)
+        
+        instance_head_kwargs = dict(
+                decoder_channels=256,
+                head_channels=32,
+                num_classes=(1, 2),
+                class_key=["center", "offset"]
+            )
+        self.instance_head = SinglePanopticDeepLabHead(**instance_head_kwargs)
 
     def forward(self, inputs):
-        x = inputs
-        n, _, h, w = x[-1].shape
+        pred = OrderedDict()
+        # Semantic decoder
+        semantics = inputs
+        n, _, h, w = semantics[-1].shape
         # for f in x:
         #     mmcv.print_log(f'{f.shape}', 'mmseg')
 
-        os_size = x[0].size()[2:]
+        os_size = semantics[0].size()[2:]
         _c = {}
         for i in self.in_index:
             # mmcv.print_log(f'{i}: {x[i].shape}', 'mmseg')
-            _c[i] = self.embed_layers[str(i)](x[i])
+            _c[i] = self.embed_layers[str(i)](semantics[i])
             if _c[i].dim() == 3:
                 _c[i] = _c[i].permute(0, 2, 1).contiguous()\
-                    .reshape(n, -1, x[i].shape[2], x[i].shape[3])
+                    .reshape(n, -1, semantics[i].shape[2], semantics[i].shape[3])
             # mmcv.print_log(f'_c{i}: {_c[i].shape}', 'mmseg')
             if _c[i].size()[2:] != os_size:
                 # mmcv.print_log(f'resize {i}', 'mmseg')
@@ -173,7 +216,38 @@ class DAFormerHead(BaseDecodeHead):
                     mode='bilinear',
                     align_corners=self.align_corners)
 
-        x = self.fuse_layer(torch.cat(list(_c.values()), dim=1))
-        x = self.cls_seg(x)
+        semantics = self.fuse_layer(torch.cat(list(_c.values()), dim=1))
+        semantics = self.cls_seg(semantics)
+    
+        pred['semantic'] = semantics
 
-        return x
+        # Instance decoder
+        instance = inputs
+        n, _, h, w = instance[-1].shape
+
+        os_size = instance[0].size()[2:]
+        _c = {}
+        for i in self.in_index:
+            # mmcv.print_log(f'{i}: {x[i].shape}', 'mmseg')
+            _c[i] = self.embed_layers[str(i)](instance[i])
+            if _c[i].dim() == 3:
+                _c[i] = _c[i].permute(0, 2, 1).contiguous()\
+                    .reshape(n, -1, instance[i].shape[2], instance[i].shape[3])
+            # mmcv.print_log(f'_c{i}: {_c[i].shape}', 'mmseg')
+            if _c[i].size()[2:] != os_size:
+                # mmcv.print_log(f'resize {i}', 'mmseg')
+                _c[i] = resize(
+                    _c[i],
+                    size=os_size,
+                    mode='bilinear',
+                    align_corners=self.align_corners)
+
+        instance = self.fuse_layer(torch.cat(list(_c.values()), dim=1))
+        instance = self.conv_inst(instance)
+        pred['center'] = self.conv_inst_center(instance)
+        pred['offset'] = self.conv_inst_offset(instance)
+
+        # instance = self.instance_head(instance)
+        # for key in instance.keys():
+        #     pred[key] = instance[key]
+        return pred

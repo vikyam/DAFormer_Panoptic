@@ -10,7 +10,7 @@ from mmcv.runner import BaseModule, auto_fp16, force_fp32
 from mmseg.core import build_pixel_sampler
 from mmseg.ops import resize
 from ..builder import build_loss
-from ..losses import accuracy
+from ..losses import accuracy, L1Loss, MSELoss
 
 
 class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
@@ -81,8 +81,16 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         self.act_cfg = act_cfg
         self.in_index = in_index
         self.loss_decode_sem = build_loss(loss_decode_sem)
-        self.loss_decode_centre = build_loss(loss_decode_centre)
-        self.loss_decode_offset = build_loss(loss_decode_offset)
+        if loss_decode_centre['type'] == 'MSE':
+            self.loss_decode_centre = MSELoss(reduction=loss_decode_centre['reduction'])
+        else:
+            self.loss_decode_centre = L1Loss(reduction=loss_decode_centre['reduction'])
+        if loss_decode_offset['type'] == 'L1':
+            self.loss_decode_offset = L1Loss(reduction=loss_decode_offset['reduction'])
+        else:
+            self.loss_decode_offset = MSELoss(reduction=loss_decode_offset['reduction'])
+        self.center_loss_weight = loss_decode_centre['loss_weight']
+        self.offset_loss_weight = loss_decode_offset['loss_weight']
         self.ignore_index = ignore_index
         self.align_corners = align_corners
         self.center_loss = center_loss
@@ -93,6 +101,9 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             self.sampler = None
 
         self.conv_seg = nn.Conv2d(channels, num_classes, kernel_size=1)
+        self.conv_inst = nn.Conv2d(channels, 256, kernel_size=1)
+        self.conv_inst_center = nn.Conv2d(channels, 1, kernel_size=1)
+        self.conv_inst_offset = nn.Conv2d(channels, 2, kernel_size=1)
         if dropout_ratio > 0:
             self.dropout = nn.Dropout2d(dropout_ratio)
         else:
@@ -181,7 +192,6 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                       inputs,
                       img_metas,
                       gt_pan_data,
-                      gt_semantic_seg,
                       train_cfg,
                       flag='semantic',
                       seg_weight=None):
@@ -201,8 +211,12 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             dict[str, Tensor]: a dictionary of loss components
         """
         results = self.forward(inputs)
-        losses = self.losses(results, gt_pan_data, gt_semantic_seg, seg_weight)
-        return losses
+        if type(gt_pan_data) is dict:
+            gt_pan_data['semantic'] = gt_pan_data['semantic'].squeeze(1)
+        else:
+            gt_pan_data = gt_pan_data.squeeze(1)
+        losses = self.losses(results, gt_pan_data, seg_weight)
+        return losses, results
 
     def forward_test(self, inputs, img_metas, test_cfg):
         """Forward function for testing.
@@ -229,49 +243,56 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         return output
 
     @force_fp32(apply_to=('results', ))
-    def losses(self, results, seg_label, seg_weight=None):
+    def losses(self, results, pan_labels, seg_weight=None):
         """Compute all losses here."""
         loss = dict()
-        results = resize(
-            input=results,
-            size=seg_label.shape[2:],
-            mode='bilinear',
-            align_corners=self.align_corners)
-        if self.sampler is not None:
-            seg_weight = self.sampler.sample(results, seg_label)
-        seg_label = seg_label.squeeze(1)
-        loss['loss_seg'] = self.loss_decode(
-            results,
-            seg_label,
-            weight=seg_weight,
-            ignore_index=self.ignore_index)
-        loss['acc_seg'] = accuracy(results, seg_label)
-
-        batch_size = results['semantic'].size(0)
-        loss = 0
-        if seg_label is not None:
+        if type(pan_labels) is dict:
+            for key in results:
+                results[key] = resize(
+                input=results[key],
+                size=pan_labels['semantic'].shape[1:],
+                mode='bilinear',
+                align_corners=self.align_corners)
+            if self.sampler is not None:
+                seg_weight = self.sampler.sample(results['semantic'], pan_labels['semantic'])
+            # seg_label = seg_label.squeeze(1)
+            loss['acc_seg'] = accuracy(results['semantic'], pan_labels['semantic'])
             semantic_loss = self.loss_decode_sem(
-                    results['semantic'], seg_label, weight=seg_weight, ignore_index=self.ignore_index)
+                        results['semantic'], pan_labels['semantic'], weight=seg_weight, ignore_index=self.ignore_index)
             loss['loss_seg'] = semantic_loss
-            if self.center_loss is not None:
+            if self.center_loss:
                 # Pixel-wise loss weight
-                center_loss_weights = targets['center_weights'][:, None, :, :].expand_as(results['center'])
-                center_loss = self.loss_decode_centre(results['center'], targets['center']) * center_loss_weights
+                center_loss_weights = pan_labels['center_weights'][:, None, :, :].expand_as(results['center'])
+                center_loss = self.loss_decode_centre(results['center'], pan_labels['center']) * center_loss_weights
                 # safe division
                 if center_loss_weights.sum() > 0:
                     center_loss = center_loss.sum() / center_loss_weights.sum() * self.center_loss_weight
                 else:
                     center_loss = center_loss.sum() * 0
                 loss['loss_center'] = center_loss
-            if self.offset_loss is not None:
+            if self.offset_loss:
                 # Pixel-wise loss weight
-                offset_loss_weights = targets['offset_weights'][:, None, :, :].expand_as(results['offset'])
-                offset_loss = self.loss_decode_offset(results['offset'], targets['offset']) * offset_loss_weights
+                offset_loss_weights = pan_labels['offset_weights'][:, None, :, :].expand_as(results['offset'])
+                offset_loss = self.loss_decode_offset(results['offset'], pan_labels['offset']) * offset_loss_weights
                 # safe division
                 if offset_loss_weights.sum() > 0:
                     offset_loss = offset_loss.sum() / offset_loss_weights.sum() * self.offset_loss_weight
                 else:
                     offset_loss = offset_loss.sum() * 0
                 loss['loss_offset'] = offset_loss
+        else:
+            for key in results:
+                results[key] = resize(
+                input=results[key],
+                size=pan_labels.shape[1:],
+                mode='bilinear',
+                align_corners=self.align_corners)
+            if self.sampler is not None:
+                seg_weight = self.sampler.sample(results['semantic'], pan_labels)
+            # seg_label = seg_label.squeeze(1)
+            loss['acc_seg'] = accuracy(results['semantic'], pan_labels)
+            semantic_loss = self.loss_decode_sem(
+                        results['semantic'], pan_labels, weight=seg_weight, ignore_index=self.ignore_index)
+            loss['loss_seg'] = semantic_loss
         
         return loss

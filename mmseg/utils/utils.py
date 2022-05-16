@@ -21,9 +21,9 @@ def downscale_label_ratio(gt,
                           n_classes,
                           ignore_index=255):
     assert scale_factor > 1
-    bs, orig_c, orig_h, orig_w = gt.shape
-    assert orig_c == 1
-    trg_h, trg_w = orig_h // scale_factor, orig_w // scale_factor
+    bs, orig_h, orig_w = gt.shape
+    # Change for panoptic. Removed check for channel size
+    trg_h, trg_w = round(orig_h // scale_factor), round(orig_w // scale_factor)
     ignore_substitute = n_classes
 
     out = gt.clone()  # otw. next line would modify original gt

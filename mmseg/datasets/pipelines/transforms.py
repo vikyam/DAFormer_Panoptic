@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from mmcv.utils import deprecated_api_warning, is_tuple_of
 from numpy import random
+from cityscapesscripts.helpers.labels import id2label
 
 from ..builder import PIPELINES
 
@@ -349,8 +350,8 @@ class Pad(object):
     def _pad_seg(self, results):
         """Pad masks according to ``results['pad_shape']``."""
         for key in results.get('seg_fields', []):
-            results[key] = mmcv.impad(
-                results[key],
+            results[key]['semantic'] = mmcv.impad(
+                results[key]['semantic'],
                 shape=results['pad_shape'][:2],
                 pad_val=self.seg_pad_val)
 
@@ -405,7 +406,7 @@ class Normalize(object):
         """
 
         results['img'] = mmcv.imnormalize(results['img'], self.mean, self.std,
-                                          self.to_rgb)
+                                          self.to_rgb)           
         results['img_norm_cfg'] = dict(
             mean=self.mean, std=self.std, to_rgb=self.to_rgb)
         return results
@@ -557,7 +558,7 @@ class RandomCrop(object):
         if self.cat_max_ratio < 1.:
             # Repeat 10 times
             for _ in range(10):
-                seg_temp = self.crop(results['gt_semantic_seg'], crop_bbox)
+                seg_temp = self.crop(results['pan_gt'], crop_bbox)
                 labels, cnt = np.unique(seg_temp, return_counts=True)
                 cnt = cnt[labels != self.ignore_index]
                 if len(cnt) > 1 and np.max(cnt) / np.sum(
@@ -937,7 +938,7 @@ class PanopticTargetGenerator(object):
         x0, y0 = 3 * sigma + 1, 3 * sigma + 1
         self.g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
 
-    def __call__(self, panoptic, segments):
+    def __call__(self, panoptic):
         """Generates the training target.
         reference: https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/preparation/createPanopticImgs.py
         reference: https://github.com/facebookresearch/detectron2/blob/master/datasets/prepare_panoptic_fpn.py#L18
@@ -982,7 +983,46 @@ class PanopticTargetGenerator(object):
         # (3) (Optional) It is stuff region (for offset branch)
         center_weights = np.zeros_like(panoptic, dtype=np.uint8)
         offset_weights = np.zeros_like(panoptic, dtype=np.uint8)
-        for seg in segments:
+
+        # Insert here the segment seperation from panoptic data
+        segmentIds = np.unique(panoptic)
+        segmInfo = []
+        for segmentId in segmentIds:
+            if segmentId < 1000:
+                semanticId = segmentId
+                isCrowd = 1
+            else:
+                semanticId = segmentId // 1000
+                isCrowd = 0
+            labelInfo = id2label[semanticId]
+            categoryId = labelInfo.trainId 
+            if labelInfo.ignoreInEval:
+                continue
+            if not labelInfo.hasInstances:
+                isCrowd = 0
+            
+            mask = panoptic == segmentId
+
+            area = np.sum(mask) # segment area computation
+
+            # bbox computation for a segment
+            hor = np.sum(mask, axis=0)
+            hor_idx = np.nonzero(hor)[0]
+            x = hor_idx[0]
+            width_ex = hor_idx[-1] - x + 1
+            vert = np.sum(mask, axis=1)
+            vert_idx = np.nonzero(vert)[0]
+            y = vert_idx[0]
+            height_ex = vert_idx[-1] - y + 1
+            bbox = [int(x), int(y), int(width_ex), int(height_ex)]
+
+            segmInfo.append({"id": int(segmentId),
+                             "category_id": int(categoryId),
+                             "area": int(area),
+                             "bbox": bbox,
+                             "iscrowd": isCrowd})
+
+        for seg in segmInfo:
             cat_id = seg["category_id"]
             if self.ignore_crowd_in_semantic:
                 if not seg['iscrowd']:

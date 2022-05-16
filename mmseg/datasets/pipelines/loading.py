@@ -175,7 +175,33 @@ class LoadAnnotations(object):
         return repr_str
 
 @PIPELINES.register_module()
-class LoadAnnotationsPanopticSynthia(object):
+class LoadAnnotationsPanopticImage(object):
+    def __init__(self, ignore_stuff_in_offset=False,
+                 small_instance_area=0,
+                 small_instance_weight=1,):
+        self.num_classes = _CITYSCAPES_INFORMATION.num_classes
+        self.ignore_label = _CITYSCAPES_INFORMATION.ignore_label
+        self.label_dtype = np.float32
+        self.thing_list = _CITYSCAPES_THING_LIST
+        
+    def __call__(self, results):
+
+        if results['aux_prefix']:
+            filename = osp.join(results['pan_prefix'], results['aux_prefix'],
+                                results['ann_info']['seg_map'])
+        else:
+            filename = osp.join(results['pan_prefix'],
+                                results['ann_info']['seg_map'])
+        # Load panoptic gt image
+        pan_gt = Image.open(filename)
+        pan_gt = np.array(pan_gt, dtype=np.uint32).astype('long')
+        results['pan_gt'] = pan_gt
+        results['seg_fields'].append('pan_gt')
+        
+        return results
+
+@PIPELINES.register_module()
+class LoadAnnotationsPanopticData(object):
     def __init__(self, ignore_stuff_in_offset=False,
                  small_instance_area=0,
                  small_instance_weight=1,):
@@ -192,29 +218,10 @@ class LoadAnnotationsPanopticSynthia(object):
         
     def __call__(self, results):
 
-        if results['aux_prefix']:
-            filename = osp.join(results['pan_prefix'], results['aux_prefix'],
-                                results['ann_info']['seg_map'])
-        else:
-            filename = osp.join(results['pan_prefix'],
-                                results['ann_info']['seg_map'])
-        dict_filename = osp.join(results['pan_prefix'],
-                                results['dict_dir'])
-        
-        # Load panoptic gt image
-        pan_gt = Image.open(filename)
-        pan_gt = np.array(pan_gt, dtype=np.uint32)
-
-        with open(dict_filename) as instance_dict:
-            instance_data_full = json.load(instance_dict)
-        
-        img_no = int(results['img_info']['filename'].split('.')[0])
-        instance_data = instance_data_full['annotations'][img_no]
-        instance_data = instance_data['segments_info']
-        results['gt_pan_data'] = self.target_transform(pan_gt, instance_data)
-        results['gt_semantic_seg'] = np.array(results['gt_pan_data']['semantic'])
-        results['seg_fields'].append('gt_semantic_seg')
-        
+        results['gt_pan_data'] = self.target_transform(results['pan_gt']) 
+        results['gt_pan_data']['semantic'] = np.array(results['gt_pan_data']['semantic'], dtype=np.uint32).astype('long')
+        results['seg_fields'].clear()
+        results['seg_fields'].append('gt_pan_data') 
         return results
     
     @staticmethod
@@ -235,6 +242,7 @@ class LoadAnnotationsPanopticSynthia(object):
                 color = color.astype(np.int32)
             return color[:, :, 0] + 256 * color[:, :, 1] + 256 * 256 * color[:, :, 2]
         return int(color[0] + 256 * color[1] + 256 * 256 * color[2])
+
 
 @PIPELINES.register_module()
 class LoadAnnotationsPanopticCity(object):

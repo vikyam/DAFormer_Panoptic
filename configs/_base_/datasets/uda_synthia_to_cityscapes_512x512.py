@@ -6,27 +6,29 @@ img_norm_cfg = dict(
 crop_size = (512, 512)
 synthia_train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotationsPanopticSynthia'),
+    dict(type='LoadAnnotationsPanopticImage'),
     dict(type='Resize', img_scale=(1280, 720)),
     dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
     dict(type='RandomFlip', prob=0.5),
     # dict(type='PhotoMetricDistortion'),  # is applied later in dacs.py
+    dict(type='LoadAnnotationsPanopticData'),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_pan_data', 'gt_semantic_seg']),
+    dict(type='Collect', keys=['img', 'gt_pan_data']),
 ]
 cityscapes_train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotationsPanopticCity'),
+    dict(type='LoadAnnotationsPanopticImage'),
     dict(type='Resize', img_scale=(1024, 512)),
     dict(type='RandomCrop', crop_size=crop_size),
     dict(type='RandomFlip', prob=0.5),
     # dict(type='PhotoMetricDistortion'),  # is applied later in dacs.py
+    dict(type='LoadAnnotationsPanopticData'),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_pan_data', 'gt_semantic_seg']),
+    dict(type='Collect', keys=['img', 'gt_pan_data']),
 ]
 test_pipeline = [
     dict(type='LoadImageFromFile'),

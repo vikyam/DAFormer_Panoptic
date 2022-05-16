@@ -6,6 +6,8 @@ import torch
 from matplotlib import pyplot as plt
 from PIL import Image
 
+from mmseg.datasets.cityscapes import CityscapesDataset
+
 Cityscapes_palette = [
     128, 64, 128, 244, 35, 232, 70, 70, 70, 102, 102, 156, 190, 153, 153, 153,
     153, 153, 250, 170, 30, 220, 220, 0, 107, 142, 35, 152, 251, 152, 70, 130,
@@ -84,7 +86,6 @@ def _colorize(img, cmap, mask_zero=False):
         colored_image[mask, :] = [1, 1, 1]
     return colored_image
 
-
 def subplotimg(ax,
                img,
                title,
@@ -107,6 +108,10 @@ def subplotimg(ax,
             img = img.permute(1, 2, 0)
             if not torch.is_tensor(img):
                 img = img.numpy()
+        elif img.shape[0] == 19:
+            if not torch.is_tensor(img):
+                img = img.numpy()
+            img = np.argmax(img, axis=0)
         if kwargs.get('cmap', '') == 'cityscapes':
             kwargs.pop('cmap')
             if torch.is_tensor(img):

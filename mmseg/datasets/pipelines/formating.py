@@ -151,7 +151,7 @@ class ToDataContainer(object):
 
     def __init__(self,
                  fields=(dict(key='img',
-                              stack=True), dict(key='gt_semantic_seg'))):
+                              stack=True), dict(key='gt_pan_data'))):
         self.fields = fields
 
     def __call__(self, results):
@@ -205,12 +205,10 @@ class DefaultFormatBundle(object):
                 img = np.expand_dims(img, -1)
             img = np.ascontiguousarray(img.transpose(2, 0, 1))
             results['img'] = DC(to_tensor(img), stack=True)
-        if 'gt_semantic_seg' in results:
+        if 'gt_pan_data' in results:
             # convert to long
-            results['gt_semantic_seg'] = DC(
-                to_tensor(results['gt_semantic_seg'][None,
-                                                     ...].astype(np.int64)),
-                stack=True)
+            results['gt_pan_data']['semantic'] = to_tensor(results['gt_pan_data']['semantic'][None,
+                                                     ...].astype(np.int64))
         return results
 
     def __repr__(self):

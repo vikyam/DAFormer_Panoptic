@@ -29,7 +29,7 @@ class UDADecorator(BaseSegmentor):
         self.model = build_segmentor(deepcopy(cfg['model']))
         self.train_cfg = cfg['model']['train_cfg']
         self.test_cfg = cfg['model']['test_cfg']
-        self.num_classes = cfg['model']['decode_head_semantic']['num_classes']
+        self.num_classes = cfg['model']['decode_head']['num_classes']
 
     def get_model(self):
         return get_module(self.model)

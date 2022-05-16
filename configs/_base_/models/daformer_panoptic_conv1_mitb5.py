@@ -30,9 +30,9 @@ model = dict(
         loss_decode_sem=dict(
             type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0),
         loss_decode_centre=dict(
-            type='CentreLoss', use_sigmoid=False, loss_weight=1.0),
+            type='MSE', reduction='none', loss_weight=200.0),
         loss_decode_offset=dict(
-            type='OffsetLoss', use_sigmoid=False, loss_weight=1.0),
+            type='L1', reduction='none', loss_weight=0.01),
         center_loss = True,
         offset_loss = True),
     # model training and testing settings

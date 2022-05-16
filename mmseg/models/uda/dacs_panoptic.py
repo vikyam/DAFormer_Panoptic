@@ -183,7 +183,7 @@ class DACSPANOPTIC(UDADecorator):
         feat_log.pop('loss', None)
         return feat_loss, feat_log
 
-    def forward_train(self, img, img_metas, gt_pan_data, gt_semantic_seg, target_img,
+    def forward_train(self, img, img_metas, gt_pan_data, target_img,
                       target_img_metas):
         """Forward function for training.
 
@@ -204,7 +204,6 @@ class DACSPANOPTIC(UDADecorator):
         img = img.data[0]
         img_metas = img_metas.data[0]
         pan_gt = gt_pan_data
-        gt_semantic_seg = gt_semantic_seg.data[0]
         target_img = target_img.data[0]
         target_img_metas = target_img_metas.data[0]
 
@@ -234,8 +233,8 @@ class DACSPANOPTIC(UDADecorator):
         }
 
         # Train on source images
-        clean_losses = self.get_model().forward_train(
-            img, img_metas, pan_gt, gt_semantic_seg, return_feat=True)
+        clean_losses, network_output = self.get_model().forward_train(
+            img, img_metas, pan_gt, return_feat=True)
         src_feat = clean_losses.pop('features')
         # Change this for panoptic
         clean_loss, clean_log_vars = self._parse_losses_panoptic(clean_losses)
@@ -250,8 +249,9 @@ class DACSPANOPTIC(UDADecorator):
             mmcv.print_log(f'Seg. Grad.: {grad_mag}', 'mmseg')
 
         # ImageNet feature distance
+        # pan_gt['semantic'] = pan_gt['semantic'].unsqueeze(1)
         if self.enable_fdist:
-            feat_loss, feat_log = self.calc_feat_dist(img, gt_semantic_seg,
+            feat_loss, feat_log = self.calc_feat_dist(img, pan_gt['semantic'],
                                                       src_feat)
             feat_loss.backward()
             log_vars.update(add_prefix(feat_log, 'src'))
@@ -292,22 +292,23 @@ class DACSPANOPTIC(UDADecorator):
 
         # Apply mixing
         mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
-        mix_masks = get_class_masks(gt_semantic_seg)
+        mix_masks = get_class_masks(pan_gt['semantic'])
 
         for i in range(batch_size):
             strong_parameters['mix'] = mix_masks[i]
             mixed_img[i], mixed_lbl[i] = strong_transform(
                 strong_parameters,
                 data=torch.stack((img[i], target_img[i])),
-                target=torch.stack((gt_semantic_seg[i][0], pseudo_label[i])))
+                target=torch.stack((pan_gt['semantic'][i], pseudo_label[i])))
             _, pseudo_weight[i] = strong_transform(
                 strong_parameters,
                 target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])))
         mixed_img = torch.cat(mixed_img)
         mixed_lbl = torch.cat(mixed_lbl)
 
+
         # Train on mixed images
-        mix_losses = self.get_model().forward_train(
+        mix_losses, network_output_mixed = self.get_model().forward_train(
             mixed_img, img_metas, mixed_lbl, pseudo_weight, return_feat=True)
         mix_losses.pop('features')
         mix_losses = add_prefix(mix_losses, 'mix')
@@ -323,7 +324,7 @@ class DACSPANOPTIC(UDADecorator):
             vis_trg_img = torch.clamp(denorm(target_img, means, stds), 0, 1)
             vis_mixed_img = torch.clamp(denorm(mixed_img, means, stds), 0, 1)
             for j in range(batch_size):
-                rows, cols = 2, 5
+                rows, cols = 2, 6
                 fig, axs = plt.subplots(
                     rows,
                     cols,
@@ -341,7 +342,7 @@ class DACSPANOPTIC(UDADecorator):
                 subplotimg(axs[1][0], vis_trg_img[j], 'Target Image')
                 subplotimg(
                     axs[0][1],
-                    gt_semantic_seg[j],
+                    gt_pan_data['semantic'][j],
                     'Source Seg GT',
                     cmap='cityscapes')
                 subplotimg(
@@ -349,7 +350,9 @@ class DACSPANOPTIC(UDADecorator):
                     pseudo_label[j],
                     'Target Seg (Pseudo) GT',
                     cmap='cityscapes')
-                subplotimg(axs[0][2], vis_mixed_img[j], 'Mixed Image')
+                subplotimg(axs[0][2], network_output['semantic'][j], 'Source Sem Pred', cmap='cityscapes')
+                subplotimg(axs[0][5], vis_mixed_img[j], 'Mixed Image')
+                subplotimg(axs[1][5], network_output_mixed['semantic'][j], 'Mixed Sem Pred')
                 subplotimg(
                     axs[1][2], mix_masks[j][0], 'Domain Mask', cmap='gray')
                 # subplotimg(axs[0][3], pred_u_s[j], "Seg Pred",
@@ -379,13 +382,24 @@ class DACSPANOPTIC(UDADecorator):
                 # Tensorboard images
                 pseudo_label_plot = np.array(colorize_mask_tensorboard(pseudo_label[0].numpy()))
                 self.writer.add_image('Source Image', vis_img[0], self.local_iter)
-                self.writer.add_image('Source Image GT', gt_semantic_seg[0], self.local_iter)
+                # self.writer.add_image('Source Image GT', gt_pan_data['semantic'][0], self.local_iter)
                 self.writer.add_image('Source Image Mixed', vis_mixed_img[0], self.local_iter)
                 self.writer.add_image('Target Image', vis_trg_img[0], self.local_iter)
                 # self.writer.add_image('Target Image Prediciton(Pseudo)', pseudo_label_plot, self.local_iter)
                 # Tensorboard quants
 
-
         self.local_iter += 1
 
         return log_vars
+    
+    def sem2rgb(self, pred):
+        """Function to convert semantic prediction to rgb image for visualization.
+
+        Args:
+            pred (Tensor): Predicted image.
+
+        Returns:
+            pred_rgb[Tensor]: rgb prediction
+        """
+
+        return 0
