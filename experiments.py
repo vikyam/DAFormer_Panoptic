@@ -222,7 +222,7 @@ def generate_experiment_cfgs(id):
     # -------------------------------------------------------------------------
     cfgs = []
     n_gpus = 1
-    batch_size = 1
+    batch_size = 2
     iters = 40000
     opt, lr, schedule, pmult = 'adamw', 0.00006, 'poly10warm', True
     crop = '512x512'

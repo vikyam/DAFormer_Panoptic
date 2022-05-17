@@ -125,3 +125,68 @@ def subplotimg(ax,
 
     ax.imshow(img, **kwargs)
     ax.set_title(title)
+
+def save_panoptic_annotation(label,
+                             label_divisor=1000,
+                             colormap=None):
+    """Saves the given label to image on disk.
+    Args:
+        label: The numpy array to be saved.
+        label_divisor: An Integer, used to convert panoptic id = semantic id * label_divisor + instance_id.
+        colormap: A colormap for visualizing segmentation results.
+    """
+    if colormap is None:
+        colormap = create_label_colormap()
+    
+    # Add colormap to label.
+    colored_label = np.zeros((label.shape[0], label.shape[1], 3), dtype=np.uint8)
+    taken_colors = set([0, 0, 0])
+
+    def _random_color(base, max_dist=30):
+        new_color = base + np.random.randint(low=-max_dist,
+                                             high=max_dist + 1,
+                                             size=3)
+        return tuple(np.maximum(0, np.minimum(255, new_color)))
+
+    for lab in np.unique(label):
+        mask = label == lab
+        base_color = colormap[lab // label_divisor]
+        if tuple(base_color) not in taken_colors:
+            taken_colors.add(tuple(base_color))
+            color = base_color
+        else:
+            while True:
+                color = _random_color(base_color)
+                if color not in taken_colors:
+                    taken_colors.add(color)
+                    break
+        colored_label[mask] = color
+    
+    return colored_label
+
+def create_label_colormap():
+    """Creates a label colormap used in CITYSCAPES segmentation benchmark.
+    Returns:
+        A colormap for visualizing segmentation results.
+    """
+    colormap = np.zeros((256, 3), dtype=np.uint8)
+    colormap[0] = [128, 64, 128]
+    colormap[1] = [244, 35, 232]
+    colormap[2] = [70, 70, 70]
+    colormap[3] = [102, 102, 156]
+    colormap[4] = [190, 153, 153]
+    colormap[5] = [153, 153, 153]
+    colormap[6] = [250, 170, 30]
+    colormap[7] = [220, 220, 0]
+    colormap[8] = [107, 142, 35]
+    colormap[9] = [152, 251, 152]
+    colormap[10] = [70, 130, 180]
+    colormap[11] = [220, 20, 60]
+    colormap[12] = [255, 0, 0]
+    colormap[13] = [0, 0, 142]
+    colormap[14] = [0, 0, 70]
+    colormap[15] = [0, 60, 100]
+    colormap[16] = [0, 80, 100]
+    colormap[17] = [0, 0, 230]
+    colormap[18] = [119, 11, 32]
+    return colormap

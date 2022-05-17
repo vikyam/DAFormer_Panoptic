@@ -22,6 +22,12 @@ from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks,
 from mmseg.models.utils.visualization import colorize_mask, subplotimg, colorize_mask_tensorboard
 from mmseg.utils.utils import downscale_label_ratio
 
+from mmseg.utils.instance_post_processing import get_panoptic_segmentation
+from mmseg.utils.semantic_post_processing import get_semantic_segmentation
+from mmseg.models.utils.visualization import save_panoptic_annotation, create_label_colormap
+
+_CITYSCAPES_THING_LIST = [11, 12, 13, 14, 15, 16, 17, 18]
+
 
 def _params_equal(ema_model, model):
     for ema_param, param in zip(ema_model.named_parameters(),
@@ -324,7 +330,49 @@ class DACSPANOPTIC(UDADecorator):
             vis_trg_img = torch.clamp(denorm(target_img, means, stds), 0, 1)
             vis_mixed_img = torch.clamp(denorm(mixed_img, means, stds), 0, 1)
             for j in range(batch_size):
-                rows, cols = 2, 6
+                # Panoptic post processing
+                # Source
+                semantic_pred_source = get_semantic_segmentation(network_output['semantic'][j].unsqueeze(0))
+                foreground_pred_source = torch.zeros_like(semantic_pred_source)
+                for thing_class in _CITYSCAPES_THING_LIST:
+                            foreground_pred_source[semantic_pred_source == thing_class] = 1
+                panoptic_pred_source, center_pred_source = get_panoptic_segmentation(
+                            semantic_pred_source,
+                            network_output['center'][j].unsqueeze(0),
+                            network_output['offset'][j].unsqueeze(0),
+                            thing_list=_CITYSCAPES_THING_LIST,
+                            label_divisor=1000,
+                            stuff_area=2048,
+                            void_label=(1000 * 255),
+                            threshold=0.1,
+                            nms_kernel=7,
+                            top_k=200,
+                            foreground_mask=foreground_pred_source)
+                if panoptic_pred_source is not None:
+                        panoptic_pred_source = panoptic_pred_source.squeeze(0).cpu().numpy()
+                pan_image_source = save_panoptic_annotation(panoptic_pred_source, label_divisor=1000, colormap=create_label_colormap())
+                # Mixed
+                semantic_pred_mixed = get_semantic_segmentation(network_output_mixed['semantic'][j].unsqueeze(0))
+                foreground_pred_mixed = torch.zeros_like(semantic_pred_mixed)
+                for thing_class in _CITYSCAPES_THING_LIST:
+                            foreground_pred_mixed[semantic_pred_mixed == thing_class] = 1
+                panoptic_pred_mixed, center_pred_mixed = get_panoptic_segmentation(
+                            semantic_pred_mixed,
+                            network_output_mixed['center'][j].unsqueeze(0),
+                            network_output_mixed['offset'][j].unsqueeze(0),
+                            thing_list=_CITYSCAPES_THING_LIST,
+                            label_divisor=1000,
+                            stuff_area=2048,
+                            void_label=(1000 * 255),
+                            threshold=0.1,
+                            nms_kernel=7,
+                            top_k=200,
+                            foreground_mask=foreground_pred_mixed)
+                if panoptic_pred_mixed is not None:
+                        panoptic_pred_mixed = panoptic_pred_mixed.squeeze(0).cpu().numpy()
+                pan_image_mixed = save_panoptic_annotation(panoptic_pred_mixed, label_divisor=1000, colormap=create_label_colormap())
+
+                rows, cols = 2, 7
                 fig, axs = plt.subplots(
                     rows,
                     cols,
@@ -353,6 +401,8 @@ class DACSPANOPTIC(UDADecorator):
                 subplotimg(axs[0][2], network_output['semantic'][j], 'Source Sem Pred', cmap='cityscapes')
                 subplotimg(axs[0][5], vis_mixed_img[j], 'Mixed Image')
                 subplotimg(axs[1][5], network_output_mixed['semantic'][j], 'Mixed Sem Pred')
+                subplotimg(axs[0][6], pan_image_source, 'Panoptic Source')
+                subplotimg(axs[1][6], pan_image_mixed, 'Panoptic Mixed')
                 subplotimg(
                     axs[1][2], mix_masks[j][0], 'Domain Mask', cmap='gray')
                 # subplotimg(axs[0][3], pred_u_s[j], "Seg Pred",
