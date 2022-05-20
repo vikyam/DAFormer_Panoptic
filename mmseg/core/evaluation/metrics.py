@@ -5,6 +5,14 @@ from collections import OrderedDict
 import mmcv
 import numpy as np
 import torch
+from mmseg.datasets.pipelines.transforms import PanopticTargetGenerator
+from mmseg.datasets.pipelines.loading import LoadAnnotationsPanopticData
+
+_CITYSCAPES_THING_LIST = [11, 12, 13, 14, 15, 16, 17, 18]
+target_transform = PanopticTargetGenerator(255, LoadAnnotationsPanopticData.rgb2id, _CITYSCAPES_THING_LIST,
+                                                            sigma=8, ignore_stuff_in_offset=False,
+                                                            small_instance_area=0,
+                                                            small_instance_weight=1)
 
 
 def f_score(precision, recall, beta=1):
@@ -62,7 +70,11 @@ def intersect_and_union(pred_label,
         label = torch.from_numpy(
             mmcv.imread(label, flag='unchanged', backend='pillow'))
     else:
-        label = torch.from_numpy(label)
+        label = label
+
+    label = target_transform(label)
+    label = label['semantic']
+    print(label.size())
 
     if label_map is not None:
         for old_id, new_id in label_map.items():
@@ -114,7 +126,7 @@ def total_intersect_and_union(results,
          ndarray: The ground truth histogram on all classes.
     """
     num_imgs = len(results)
-    assert len(gt_seg_maps) == num_imgs
+    # assert len(gt_seg_maps) == num_imgs
     total_area_intersect = torch.zeros((num_classes, ), dtype=torch.float64)
     total_area_union = torch.zeros((num_classes, ), dtype=torch.float64)
     total_area_pred_label = torch.zeros((num_classes, ), dtype=torch.float64)

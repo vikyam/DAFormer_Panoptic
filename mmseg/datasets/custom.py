@@ -12,6 +12,7 @@ import numpy as np
 from mmcv.utils import print_log
 from prettytable import PrettyTable
 from torch.utils.data import Dataset
+from PIL import Image
 
 from mmseg.core import eval_metrics
 from mmseg.utils import get_root_logger
@@ -248,8 +249,8 @@ class CustomDataset(Dataset):
             if efficient_test:
                 gt_seg_map = seg_map
             else:
-                gt_seg_map = mmcv.imread(
-                    seg_map, flag='unchanged', backend='pillow')
+                gt_seg_map = Image.open(seg_map)
+                gt_seg_map = np.array(gt_seg_map, dtype=np.uint32).astype('long')
             gt_seg_maps.append(gt_seg_map)
         return gt_seg_maps
 

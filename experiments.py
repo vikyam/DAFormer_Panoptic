@@ -192,7 +192,7 @@ def generate_experiment_cfgs(id):
         cfg['runner'] = dict(type='IterBasedRunner', max_iters=iters)
         cfg['checkpoint_config'] = dict(
             by_epoch=False, interval=iters, max_keep_ckpts=1)
-        cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
+        cfg['evaluation'] = dict(interval=iters // 40000, metric='mIoU')
 
         # Construct config name
         uda_mod = uda
@@ -222,7 +222,7 @@ def generate_experiment_cfgs(id):
     # -------------------------------------------------------------------------
     cfgs = []
     n_gpus = 1
-    batch_size = 2
+    batch_size = 1
     iters = 40000
     opt, lr, schedule, pmult = 'adamw', 0.00006, 'poly10warm', True
     crop = '512x512'

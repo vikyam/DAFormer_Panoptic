@@ -207,11 +207,11 @@ class DACSPANOPTIC(UDADecorator):
             dict[str, Tensor]: a dictionary of loss components
         """
 
-        img = img.data[0]
-        img_metas = img_metas.data[0]
+        # img = img.data[0]
+        # img_metas = img_metas.data[0]
         pan_gt = gt_pan_data
-        target_img = target_img.data[0]
-        target_img_metas = target_img_metas.data[0]
+        # target_img = target_img.data[0]
+        # target_img_metas = target_img_metas.data[0]
 
         log_vars = {}
         batch_size = img.shape[0]
@@ -430,7 +430,7 @@ class DACSPANOPTIC(UDADecorator):
                                  f'{(self.local_iter + 1):06d}_{j}.png'))
                 plt.close()
                 # Tensorboard images
-                pseudo_label_plot = np.array(colorize_mask_tensorboard(pseudo_label[0].numpy()))
+                # pseudo_label_plot = np.array(colorize_mask_tensorboard(pseudo_label[0].numpy()))
                 self.writer.add_image('Source Image', vis_img[0], self.local_iter)
                 # self.writer.add_image('Source Image GT', gt_pan_data['semantic'][0], self.local_iter)
                 self.writer.add_image('Source Image Mixed', vis_mixed_img[0], self.local_iter)
