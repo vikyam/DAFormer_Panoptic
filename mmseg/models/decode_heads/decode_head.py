@@ -269,7 +269,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                     center_loss = center_loss.sum() / center_loss_weights.sum() * self.center_loss_weight
                 else:
                     center_loss = center_loss.sum() * 0
-                loss['loss_center'] = center_loss
+                loss['loss_center'] = center_loss 
             if self.offset_loss:
                 # Pixel-wise loss weight
                 offset_loss_weights = pan_labels['offset_weights'][:, None, :, :].expand_as(results['offset'])
@@ -279,7 +279,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                     offset_loss = offset_loss.sum() / offset_loss_weights.sum() * self.offset_loss_weight
                 else:
                     offset_loss = offset_loss.sum() * 0
-                loss['loss_offset'] = offset_loss
+                loss['loss_offset'] = offset_loss 
         else:
             for key in results:
                 results[key] = resize(

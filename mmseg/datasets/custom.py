@@ -8,11 +8,17 @@ from collections import OrderedDict
 from functools import reduce
 
 import mmcv
+import glob
+import contextlib
+import torch
+import io
 import numpy as np
+from fvcore.common.file_io import PathManager
 from mmcv.utils import print_log
 from prettytable import PrettyTable
 from torch.utils.data import Dataset
 from PIL import Image
+import json
 
 from mmseg.core import eval_metrics
 from mmseg.utils import get_root_logger
@@ -241,18 +247,15 @@ class CustomDataset(Dataset):
     def format_results(self, results, **kwargs):
         """Place holder to format result to dataset specific output."""
 
-    def get_gt_seg_maps(self, efficient_test=False):
+    def get_gt_seg_maps(self, index, efficient_test=False):
         """Get ground truth segmentation maps for evaluation."""
-        gt_seg_maps = []
-        for img_info in self.img_infos:
-            seg_map = osp.join(self.ann_dir, img_info['ann']['seg_map'])
-            if efficient_test:
-                gt_seg_map = seg_map
-            else:
-                gt_seg_map = Image.open(seg_map)
-                gt_seg_map = np.array(gt_seg_map, dtype=np.uint32).astype('long')
-            gt_seg_maps.append(gt_seg_map)
-        return gt_seg_maps
+        seg_map = osp.join(self.ann_dir, self.img_infos[index]['ann']['seg_map'])
+        if efficient_test:
+            gt_seg_map = seg_map
+        else:
+            gt_seg_map = Image.open(seg_map)
+            gt_seg_map = np.asarray(gt_seg_map, dtype=np.float32)
+        return gt_seg_map
 
     def get_classes_and_palette(self, classes=None, palette=None):
         """Get class names of current dataset.
@@ -318,7 +321,9 @@ class CustomDataset(Dataset):
         return palette
 
     def evaluate(self,
-                 results,
+                 results_sem,
+                 results_center,
+                 results_offset,
                  metric='mIoU',
                  logger=None,
                  efficient_test=False,
@@ -342,20 +347,93 @@ class CustomDataset(Dataset):
         if not set(metric).issubset(set(allowed_metrics)):
             raise KeyError('metric {} is not supported'.format(metric))
         eval_results = {}
-        gt_seg_maps = self.get_gt_seg_maps(efficient_test)
-        if self.CLASSES is None:
-            num_classes = len(
-                reduce(np.union1d, [np.unique(_) for _ in gt_seg_maps]))
-        else:
-            num_classes = len(self.CLASSES)
-        ret_metrics = eval_metrics(
-            results,
-            gt_seg_maps,
-            num_classes,
-            self.ignore_index,
-            metric,
-            label_map=self.label_map,
-            reduce_zero_label=self.reduce_zero_label)
+        
+        
+        num_img = len(results_sem)
+        print(num_img)
+        ret_metrics_areas = OrderedDict()
+        ret_metrics = OrderedDict()
+        ret_metrics_areas['total_area_intersect'] = 0
+        ret_metrics_areas['total_area_union'] = 0
+        ret_metrics_areas['total_area_label'] = 0
+        for i in range(num_img):
+            gt_seg_map = self.get_gt_seg_maps(i, efficient_test)
+            if self.CLASSES is None:
+                num_classes = len(
+                    reduce(np.union1d, [np.unique(_) for _ in gt_seg_map]))
+            else:
+                num_classes = len(self.CLASSES)
+            ret_metric = eval_metrics(
+                results_sem[i], 
+                results_center[i],
+                results_offset[i],
+                gt_seg_map,
+                num_classes,
+                self.ignore_index,
+                metric,
+                label_map=self.label_map,
+                reduce_zero_label=self.reduce_zero_label)
+            ret_metrics_areas['total_area_intersect'] += ret_metric['total_area_intersect']
+            ret_metrics_areas['total_area_union'] += ret_metric['total_area_union']
+            ret_metrics_areas['total_area_label'] += ret_metric['total_area_label']
+        
+        ret_metrics['IoU'] =  ret_metrics_areas['total_area_intersect'] / ret_metrics_areas['total_area_union']
+        ret_metrics['Acc'] = ret_metrics_areas['total_area_intersect'] / ret_metrics_areas['total_area_label']
+
+        # # Instance metric evaluation
+        # import cityscapesscripts.evaluation.evalInstanceLevelSemanticLabeling as cityscapes_eval_inst
+        # # set some global states in cityscapes evaluation API, before evaluating
+        # output_dir = 'work_dirs/local-exp8/220609_1547_syn2cs_dacs_a999_fdthings_rcs001_cpl_daformer_panoptic_sepaspp_mitb5_poly10warm_s0_afe82/preds/instance'
+        # cityscapes_eval_inst.args.predictionPath = os.path.abspath(output_dir)
+        # cityscapes_eval_inst.args.predictionWalk = None
+        # cityscapes_eval_inst.args.JSONOutput = False
+        # cityscapes_eval_inst.args.colorized = False
+
+        # # These lines are adopted from
+        # # https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/evaluation/evalInstanceLevelSemanticLabeling.py # noqa
+        # gt_dir = PathManager.get_local_path('/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/cityscapes/gtFine_panoptic')
+        # cityscapes_eval_inst.args.gtInstancesFile = os.path.join(gt_dir, "cityscapes_panoptic_val.json")
+        # groundTruthImgList = glob.glob(os.path.join(gt_dir, 'cityscapes_panoptic_val', "*", "*_gtFine_panoptic.png"))
+        
+        # groundTruthImgList = []
+        # predictionImgList = []
+        # for gt in groundTruthImgList:
+        #     predictionImgList.append(cityscapes_eval_inst.getPrediction(gt, cityscapes_eval_inst.args))
+        # results = cityscapes_eval_inst.evaluateImgLists(
+        #     predictionImgList, groundTruthImgList, cityscapes_eval_inst.args
+        # )["averages"]
+        
+        # # ret_metrics["segm"] = {"AP": results["allAp"] * 100, "AP50": results["allAp50%"] * 100}
+
+        # # Panoptic metric evaluation
+        # import cityscapesscripts.evaluation.evalPanopticSemanticLabeling as cityscapes_eval_panoptic
+        # gt_dir = '/srv/beegfs02/scratch/uda2022/data/panoptic_datasets_april_2022/data/cityscapes/'
+        # output_dir = 'work_dirs/local-exp8/220609_1547_syn2cs_dacs_a999_fdthings_rcs001_cpl_daformer_panoptic_sepaspp_mitb5_poly10warm_s0_afe82/preds/panoptic'
+        # gt_json_file = os.path.join(gt_dir, 'gtFine_panoptic', 'cityscapes_panoptic_val.json')
+        # gt_folder = os.path.join(gt_dir, 'gtFine_panoptic', 'cityscapes_panoptic_val')
+        # pred_json_file = os.path.join(output_dir, 'predictions.json')
+        # pred_folder = os.path.join(output_dir)
+        # resultsFile = os.path.join(output_dir, 'resultPanopticSemanticLabeling.json')
+
+        # # with open(gt_json_file, "r") as f:
+        # #     json_data = json.load(f)
+        # # with open(pred_json_file, "r") as f:
+        # #     json_data["annotations"] = json.load(f)
+        # # with PathManager.open(pred_json_file, "w") as f:
+        # #     f.write(json.dumps(json_data))
+
+        # with contextlib.redirect_stdout(io.StringIO()):
+        #     results_panoptic = cityscapes_eval_panoptic.evaluatePanoptic(gt_json_file, gt_folder, pred_json_file, pred_folder, resultsFile)
+        
+        # pq_met = np.zeros((num_classes, ), dtype=np.float)
+        # sq_met = np.zeros((num_classes, ), dtype=np.float)
+        # rq_met = np.zeros((num_classes, ), dtype=np.float)
+        # i = 0
+        # for res in results_panoptic['per_class']:
+        #     pq_met[i] = results_panoptic['per_class'][res]['pq']
+        #     sq_met[i] = results_panoptic['per_class'][res]['sq']
+        #     rq_met[i] = results_panoptic['per_class'][res]['rq']
+        #     i += 1
 
         if self.CLASSES is None:
             class_names = tuple(range(num_classes))
@@ -364,9 +442,25 @@ class CustomDataset(Dataset):
 
         # summary table
         ret_metrics_summary = OrderedDict({
-            ret_metric: np.round(np.nanmean(ret_metric_value) * 100, 2)
+            ret_metric: np.round(np.nanmean(ret_metric_value) * 100 * 19 / 16, 2)
             for ret_metric, ret_metric_value in ret_metrics.items()
         })
+
+        # ret_metrics_summary['Pq'] = np.round(results_panoptic['All']['pq'] * 100 * 19 / 16, 2)
+        # ret_metrics_summary['Sq'] = np.round(results_panoptic['All']['sq'] * 100 * 19 / 16, 2)
+        # ret_metrics_summary['Rq'] = np.round(results_panoptic['All']['rq'] * 100 * 19 / 16, 2)
+
+        # ret_metrics_summary['_thing_pq'] = np.round(results_panoptic['Things']['pq'] * 100, 2)
+        # ret_metrics_summary['_thing_sq'] = np.round(results_panoptic['Things']['sq'] * 100, 2)
+        # ret_metrics_summary['_thing_rq'] = np.round(results_panoptic['Things']['rq'] * 100, 2)
+
+        # ret_metrics_summary['_stuff_pq'] = np.round(results_panoptic['Stuff']['pq'] * 100, 2)
+        # ret_metrics_summary['_stuff_sq'] = np.round(results_panoptic['Stuff']['sq'] * 100, 2)
+        # ret_metrics_summary['_stuff_rq'] = np.round(results_panoptic['Stuff']['rq'] * 100, 2)
+
+        # ret_metrics['pq'] = pq_met
+        # ret_metrics['sq'] = sq_met
+        # ret_metrics['rq'] = rq_met
 
         # each class table
         ret_metrics.pop('aAcc', None)
@@ -408,7 +502,7 @@ class CustomDataset(Dataset):
                 for idx, name in enumerate(class_names)
             })
 
-        if mmcv.is_list_of(results, str):
-            for file_name in results:
+        if mmcv.is_list_of(results_sem, str):
+            for file_name in results_sem:
                 os.remove(file_name)
         return eval_results

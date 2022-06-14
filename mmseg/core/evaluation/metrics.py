@@ -7,12 +7,33 @@ import numpy as np
 import torch
 from mmseg.datasets.pipelines.transforms import PanopticTargetGenerator
 from mmseg.datasets.pipelines.loading import LoadAnnotationsPanopticData
+from mmseg.utils.instance_post_processing import get_panoptic_segmentation
+from mmseg.utils.semantic_post_processing import get_semantic_segmentation
+# from mmseg.core.utils.save_annotations import save_annotation
+# from mmseg.core.evaluation.instance import CityscapesInstanceEvaluator
+# from mmseg.core.evaluation.panoptic import CityscapesPanopticEvaluator
 
 _CITYSCAPES_THING_LIST = [11, 12, 13, 14, 15, 16, 17, 18]
 target_transform = PanopticTargetGenerator(255, LoadAnnotationsPanopticData.rgb2id, _CITYSCAPES_THING_LIST,
                                                             sigma=8, ignore_stuff_in_offset=False,
                                                             small_instance_area=0,
                                                             small_instance_weight=1)
+
+# instance_metric = CityscapesInstanceEvaluator(
+#                 output_dir=os.path.join(config.OUTPUT_DIR, config.TEST.INSTANCE_FOLDER),
+#                 train_id_to_eval_id=data_loader.dataset.train_id_to_eval_id(),
+#                 gt_dir=os.path.join(config.DATASET.ROOT, 'gtFine', config.DATASET.TEST_SPLIT)
+#             )
+
+# panoptic_metric = CityscapesPanopticEvaluator(
+#                 output_dir=os.path.join(config.OUTPUT_DIR, config.TEST.PANOPTIC_FOLDER),
+#                 train_id_to_eval_id=data_loader.dataset.train_id_to_eval_id(),
+#                 label_divisor=data_loader.dataset.label_divisor,
+#                 void_label=data_loader.dataset.label_divisor * data_loader.dataset.ignore_label,
+#                 gt_dir=config.DATASET.ROOT,
+#                 split=config.DATASET.TEST_SPLIT,
+#                 num_classes=data_loader.dataset.num_classes
+#             )
 
 
 def f_score(precision, recall, beta=1):
@@ -65,6 +86,8 @@ def intersect_and_union(pred_label,
         pred_label = torch.from_numpy(np.load(pred_label))
     else:
         pred_label = torch.from_numpy((pred_label))
+    
+    pred_label = torch.argmax(pred_label, 0)
 
     if isinstance(label, str):
         label = torch.from_numpy(
@@ -74,8 +97,17 @@ def intersect_and_union(pred_label,
 
     label = target_transform(label)
     label = label['semantic']
-    print(label.size())
 
+    train_id_to_eval_id = [7, 8, 11, 12, 13, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 0]
+    # t2e = train_id_to_eval_id
+
+    # label = t2e(label)
+
+    # conv_label = pred_label.copy()
+    # for train_id, eval_id in enumerate(train_id_to_eval_id):
+    #         conv_label[pred_label == train_id] = eval_id
+
+    # pred_label = torch.tensor(conv_label)
     if label_map is not None:
         for old_id, new_id in label_map.items():
             label[label == old_id] = new_id
@@ -125,21 +157,21 @@ def total_intersect_and_union(results,
          ndarray: The prediction histogram on all classes.
          ndarray: The ground truth histogram on all classes.
     """
-    num_imgs = len(results)
+    # num_imgs = len(results)
     # assert len(gt_seg_maps) == num_imgs
     total_area_intersect = torch.zeros((num_classes, ), dtype=torch.float64)
     total_area_union = torch.zeros((num_classes, ), dtype=torch.float64)
     total_area_pred_label = torch.zeros((num_classes, ), dtype=torch.float64)
     total_area_label = torch.zeros((num_classes, ), dtype=torch.float64)
-    for i in range(num_imgs):
-        area_intersect, area_union, area_pred_label, area_label = \
-            intersect_and_union(
-                results[i], gt_seg_maps[i], num_classes, ignore_index,
-                label_map, reduce_zero_label)
-        total_area_intersect += area_intersect
-        total_area_union += area_union
-        total_area_pred_label += area_pred_label
-        total_area_label += area_label
+    # for i in range(num_imgs):
+    area_intersect, area_union, area_pred_label, area_label = \
+        intersect_and_union(
+            results, gt_seg_maps, num_classes, ignore_index,
+            label_map, reduce_zero_label)
+    total_area_intersect = area_intersect
+    total_area_union = area_union
+    total_area_pred_label = area_pred_label
+    total_area_label = area_label
     return total_area_intersect, total_area_union, total_area_pred_label, \
         total_area_label
 
@@ -267,8 +299,60 @@ def mean_fscore(results,
         beta=beta)
     return fscore_result
 
+def get_cityscapes_instance_format(panoptic, sem, ctr_hmp, label_divisor, score_type="semantic"):
+    """
+    Get Cityscapes instance segmentation format.
+    Arguments:
+        panoptic: A Numpy Ndarray of shape [H, W].
+        sem: A Numpy Ndarray of shape [C, H, W] of raw semantic output.
+        ctr_hmp: A Numpy Ndarray of shape [H, W] of raw center heatmap output.
+        label_divisor: An Integer, used to convert panoptic id = semantic id * label_divisor + instance_id.
+        score_type: A string, how to calculates confidence scores for instance segmentation.
+            - "semantic": average of semantic segmentation confidence within the instance mask.
+            - "instance": confidence of heatmap at center point of the instance mask.
+            - "both": multiply "semantic" and "instance".
+    Returns:
+        A List contains instance segmentation in Cityscapes format.
+    """
+    instances = []
 
-def eval_metrics(results,
+    pan_labels = np.unique(panoptic)
+    for pan_lab in pan_labels:
+        if pan_lab % label_divisor == 0:
+            # This is either stuff or ignored region.
+            continue
+
+        ins = OrderedDict()
+
+        train_class_id = pan_lab // label_divisor
+        ins['pred_class'] = train_class_id
+
+        mask = panoptic == pan_lab
+        ins['pred_mask'] = np.array(mask, dtype='uint8')
+
+        sem_scores = sem[train_class_id, ...]
+        ins_score = np.mean(sem_scores[mask])
+        # mask center point
+        mask_index = np.where(panoptic == pan_lab)
+        center_y, center_x = np.mean(mask_index[0]), np.mean(mask_index[1])
+        ctr_score = ctr_hmp[int(center_y), int(center_x)]
+
+        if score_type == "semantic":
+            ins['score'] = ins_score
+        elif score_type == "instance":
+            ins['score'] = ctr_score
+        elif score_type == "both":
+            ins['score'] = ins_score * ctr_score
+        else:
+            raise ValueError("Unknown confidence score type: {}".format(score_type))
+
+        instances.append(ins)
+
+    return instances
+
+def eval_metrics(results_sem,
+                 results_center,
+                 results_offset,
                  gt_seg_maps,
                  num_classes,
                  ignore_index,
@@ -297,22 +381,25 @@ def eval_metrics(results,
     """
     if isinstance(metrics, str):
         metrics = [metrics]
-    allowed_metrics = ['mIoU', 'mDice', 'mFscore']
+    allowed_metrics = ['mIoU', 'mDice', 'mFscore', 'Imet', 'Pmet']
     if not set(metrics).issubset(set(allowed_metrics)):
         raise KeyError('metrics {} is not supported'.format(metrics))
 
+    mask_dir = 'work_dirs/local-exp8/220530_1508_syn2cs_dacs_a999_fdthings_rcs001_cpl_daformer_panoptic_sepaspp_mitb5_poly10warm_s0_9bf47/mask_pred'
+
     total_area_intersect, total_area_union, total_area_pred_label, \
         total_area_label = total_intersect_and_union(
-            results, gt_seg_maps, num_classes, ignore_index, label_map,
+            results_sem, gt_seg_maps, num_classes, ignore_index, label_map,
             reduce_zero_label)
     all_acc = total_area_intersect.sum() / total_area_label.sum()
-    ret_metrics = OrderedDict({'aAcc': all_acc})
+    ret_metrics = OrderedDict()
     for metric in metrics:
         if metric == 'mIoU':
-            iou = total_area_intersect / total_area_union
-            acc = total_area_intersect / total_area_label
-            ret_metrics['IoU'] = iou
-            ret_metrics['Acc'] = acc
+            # iou = total_area_intersect / total_area_union
+            # acc = total_area_intersect / total_area_label
+            ret_metrics['total_area_intersect'] = total_area_intersect
+            ret_metrics['total_area_union'] = total_area_union
+            ret_metrics['total_area_label'] = total_area_label
         elif metric == 'mDice':
             dice = 2 * total_area_intersect / (
                 total_area_pred_label + total_area_label)
@@ -327,6 +414,34 @@ def eval_metrics(results,
             ret_metrics['Fscore'] = f_value
             ret_metrics['Precision'] = precision
             ret_metrics['Recall'] = recall
+        # elif metric == 'Imet':
+        #     semantic_pred = get_semantic_segmentation(results_sem.unsqueeze(0))
+        #     foreground_pred = torch.zeros_like(semantic_pred)
+        #     panoptic_pred, center_pred = get_panoptic_segmentation(semantic_pred,
+        #                 results_center.unsqueeze(0),
+        #                 results_offset.unsqueeze(0),
+        #                 thing_list=_CITYSCAPES_THING_LIST,
+        #                 label_divisor=1000,
+        #                 stuff_area=2048,
+        #                 void_label=(1000 * 255),
+        #                 threshold=0.1,
+        #                 nms_kernel=7,
+        #                 top_k=200,
+        #                 foreground_mask=foreground_pred)
+        #     instances = get_cityscapes_instance_format(panoptic_pred,
+        #                                                        results_sem.cpu().numpy(),
+        #                                                        results_center.squeeze(0).cpu().numpy(),
+        #                                                        label_divisor=1000,
+        #                                                        score_type="semantic")
+        #     num_instances = len(instances)
+        #     for i in range(num_instances):
+        #         pred_class = instances[i]['pred_class']
+        #         score = instances[i]['score']
+        #         mask = instances[i]['pred_mask'].astype("uint8")
+        #         ret_metrics[pred_class] = score
+        #         save_annotation(mask, mask_dir, image_filename + "_{}_{}".format(i, pred_class),
+        #                         add_colormap=False, scale_values=True)
+
 
     ret_metrics = {
         metric: value.numpy()

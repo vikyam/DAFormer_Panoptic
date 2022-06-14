@@ -38,7 +38,7 @@ def plot_curve(log_dicts, args):
                 epoch_logs = log_dict[epoch]
                 if metric not in epoch_logs.keys():
                     continue
-                if metric in ['mIoU', 'mAcc', 'aAcc']:
+                if metric in ['mIoU', 'mAcc', 'aAcc', 'Imet', 'Pmet']:
                     plot_epochs.append(epoch)
                     plot_values.append(epoch_logs[metric][0])
                 else:
@@ -50,7 +50,7 @@ def plot_curve(log_dicts, args):
                         plot_values.append(epoch_logs[metric][idx])
             ax = plt.gca()
             label = legend[i * num_metrics + j]
-            if metric in ['mIoU', 'mAcc', 'aAcc']:
+            if metric in ['mIoU', 'mAcc', 'aAcc', 'Imet', 'Pmet']:
                 ax.set_xticks(plot_epochs)
                 plt.xlabel('epoch')
                 plt.plot(plot_epochs, plot_values, label=label, marker='o')

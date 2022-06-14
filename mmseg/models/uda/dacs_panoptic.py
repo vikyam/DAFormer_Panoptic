@@ -255,7 +255,8 @@ class DACSPANOPTIC(UDADecorator):
             mmcv.print_log(f'Seg. Grad.: {grad_mag}', 'mmseg')
 
         # ImageNet feature distance
-        # pan_gt['semantic'] = pan_gt['semantic'].unsqueeze(1)
+        pan_gt['semantic'] = pan_gt['semantic'].unsqueeze(1)
+        # print('the size of the matrix is', pan_gt['semantic'].size())
         if self.enable_fdist:
             feat_loss, feat_log = self.calc_feat_dist(img, pan_gt['semantic'],
                                                       src_feat)
@@ -279,7 +280,7 @@ class DACSPANOPTIC(UDADecorator):
         ema_logits = self.get_ema_model().encode_decode(
             target_img, target_img_metas)
 
-        ema_softmax = torch.softmax(ema_logits.detach(), dim=1)
+        ema_softmax = torch.softmax(ema_logits['semantic'].detach(), dim=1)
         pseudo_prob, pseudo_label = torch.max(ema_softmax, dim=1)
         ps_large_p = pseudo_prob.ge(self.pseudo_threshold).long() == 1
         ps_size = np.size(np.array(pseudo_label.cpu()))
@@ -305,7 +306,7 @@ class DACSPANOPTIC(UDADecorator):
             mixed_img[i], mixed_lbl[i] = strong_transform(
                 strong_parameters,
                 data=torch.stack((img[i], target_img[i])),
-                target=torch.stack((pan_gt['semantic'][i], pseudo_label[i])))
+                target=torch.stack((pan_gt['semantic'][i][0], pseudo_label[i])))
             _, pseudo_weight[i] = strong_transform(
                 strong_parameters,
                 target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])))

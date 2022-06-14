@@ -21,7 +21,7 @@ class EvalHook(_EvalHook):
         list: The prediction results.
     """
 
-    greater_keys = ['mIoU', 'mAcc', 'aAcc']
+    greater_keys = ['mIoU', 'mAcc', 'aAcc', 'Imet', 'Pmet']
 
     def __init__(self, *args, by_epoch=False, efficient_test=False, **kwargs):
         super().__init__(*args, by_epoch=by_epoch, **kwargs)
@@ -38,6 +38,7 @@ class EvalHook(_EvalHook):
             self.dataloader,
             show=False,
             efficient_test=self.efficient_test)
+        print('im here')
         runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)
         key_score = self.evaluate(runner, results)
         if self.save_best:
@@ -57,7 +58,7 @@ class DistEvalHook(_DistEvalHook):
         list: The prediction results.
     """
 
-    greater_keys = ['mIoU', 'mAcc', 'aAcc']
+    greater_keys = ['mIoU', 'mAcc', 'aAcc', 'Imet', 'Pmet']
 
     def __init__(self, *args, by_epoch=False, efficient_test=False, **kwargs):
         super().__init__(*args, by_epoch=by_epoch, **kwargs)

@@ -36,12 +36,13 @@ class SinglePanopticDeepLabHead(nn.Module):
         self.class_key = class_key
 
     def forward(self, x):
-        pred = OrderedDict()
+        # pred = OrderedDict()
         # build classifier
-        for key in self.class_key:
-            pred[key] = self.classifier[key](x)
+        # for key in self.class_key:
+        center = self.classifier['center'](x)
+        offset = self.classifier['offset'](x)
 
-        return pred
+        return center, offset
 
 
 class ASPPWrapper(nn.Module):
@@ -169,18 +170,32 @@ class DAFormerHead(BaseDecodeHead):
             if cfg is not None and 'aspp' in cfg['type']:
                 cfg['align_corners'] = self.align_corners
 
-        self.embed_layers = {}
+        self.embed_layers_semantic = {}
         for i, in_channels, embed_dim in zip(self.in_index, self.in_channels,
                                              embed_dims):
             if i == self.in_index[-1]:
-                self.embed_layers[str(i)] = build_layer(
+                self.embed_layers_semantic[str(i)] = build_layer(
                     in_channels, embed_dim, **embed_neck_cfg)
             else:
-                self.embed_layers[str(i)] = build_layer(
+                self.embed_layers_semantic[str(i)] = build_layer(
                     in_channels, embed_dim, **embed_cfg)
-        self.embed_layers = nn.ModuleDict(self.embed_layers)
+        self.embed_layers_semantic = nn.ModuleDict(self.embed_layers_semantic)
 
-        self.fuse_layer = build_layer(
+        self.fuse_layer_semantic = build_layer(
+            sum(embed_dims), self.channels, **fusion_cfg)
+
+        self.embed_layers_instance = {}
+        for i, in_channels, embed_dim in zip(self.in_index, self.in_channels,
+                                             embed_dims):
+            if i == self.in_index[-1]:
+                self.embed_layers_instance[str(i)] = build_layer(
+                    in_channels, embed_dim, **embed_neck_cfg)
+            else:
+                self.embed_layers_instance[str(i)] = build_layer(
+                    in_channels, embed_dim, **embed_cfg)
+        self.embed_layers_instance = nn.ModuleDict(self.embed_layers_instance)
+
+        self.fuse_layer_instance = build_layer(
             sum(embed_dims), self.channels, **fusion_cfg)
         
         instance_head_kwargs = dict(
@@ -203,7 +218,7 @@ class DAFormerHead(BaseDecodeHead):
         _c = {}
         for i in self.in_index:
             # mmcv.print_log(f'{i}: {x[i].shape}', 'mmseg')
-            _c[i] = self.embed_layers[str(i)](semantics[i])
+            _c[i] = self.embed_layers_semantic[str(i)](semantics[i])
             if _c[i].dim() == 3:
                 _c[i] = _c[i].permute(0, 2, 1).contiguous()\
                     .reshape(n, -1, semantics[i].shape[2], semantics[i].shape[3])
@@ -216,7 +231,7 @@ class DAFormerHead(BaseDecodeHead):
                     mode='bilinear',
                     align_corners=self.align_corners)
 
-        semantics = self.fuse_layer(torch.cat(list(_c.values()), dim=1))
+        semantics = self.fuse_layer_semantic(torch.cat(list(_c.values()), dim=1))
         semantics = self.cls_seg(semantics)
     
         pred['semantic'] = semantics
@@ -229,7 +244,7 @@ class DAFormerHead(BaseDecodeHead):
         _c = {}
         for i in self.in_index:
             # mmcv.print_log(f'{i}: {x[i].shape}', 'mmseg')
-            _c[i] = self.embed_layers[str(i)](instance[i])
+            _c[i] = self.embed_layers_instance[str(i)](instance[i])
             if _c[i].dim() == 3:
                 _c[i] = _c[i].permute(0, 2, 1).contiguous()\
                     .reshape(n, -1, instance[i].shape[2], instance[i].shape[3])
@@ -242,12 +257,14 @@ class DAFormerHead(BaseDecodeHead):
                     mode='bilinear',
                     align_corners=self.align_corners)
 
-        instance = self.fuse_layer(torch.cat(list(_c.values()), dim=1))
-        instance = self.conv_inst(instance)
-        pred['center'] = self.conv_inst_center(instance)
-        pred['offset'] = self.conv_inst_offset(instance)
+        instance = self.fuse_layer_instance(torch.cat(list(_c.values()), dim=1))
+        # instance = self.conv_inst(instance)
+        # pred['center'] = self.conv_inst_center(instance)
+        # pred['offset'] = self.conv_inst_offset(instance)
 
-        # instance = self.instance_head(instance)
-        # for key in instance.keys():
-        #     pred[key] = instance[key]
+        center, offset = self.instance_head(instance)
+        pred['center'] = center
+        pred['offset'] = offset
+        # # for key in instance.keys():
+        # #     pred[key] = instance[key]
         return pred

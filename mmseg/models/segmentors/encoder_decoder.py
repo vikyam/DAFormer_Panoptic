@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mmseg.core import add_prefix
+from collections import OrderedDict
 from mmseg.ops import resize
 from .. import builder
 from ..builder import SEGMENTORS
@@ -74,8 +75,18 @@ class EncoderDecoder(BaseSegmentor):
         map of the same size as input."""
         x = self.extract_feat(img)
         out = self._decode_head_forward_test(x, img_metas)
-        out = resize(
-            input=out,
+        out['semantic'] = resize(
+            input=out['semantic'],
+            size=img.shape[2:],
+            mode='bilinear',
+            align_corners=self.align_corners)
+        out['center'] = resize(
+            input=out['center'],
+            size=img.shape[2:],
+            mode='bilinear',
+            align_corners=self.align_corners)
+        out['offset'] = resize(
+            input=out['offset'],
             size=img.shape[2:],
             mode='bilinear',
             align_corners=self.align_corners)
@@ -100,7 +111,7 @@ class EncoderDecoder(BaseSegmentor):
         """Run forward function and calculate loss for decode head in
         inference."""
         seg_logits = self.decode_head.forward_test(x, img_metas, self.test_cfg)
-        return seg_logits['semantic']
+        return seg_logits
 
     def _auxiliary_head_forward_train(self,
                                       x,
@@ -223,8 +234,20 @@ class EncoderDecoder(BaseSegmentor):
                 size = img.shape[2:]
             else:
                 size = img_meta[0]['ori_shape'][:2]
-            seg_logit = resize(
-                seg_logit,
+            seg_logit['semantic'] = resize(
+                seg_logit['semantic'],
+                size=size,
+                mode='bilinear',
+                align_corners=self.align_corners,
+                warning=False)
+            seg_logit['center'] = resize(
+                seg_logit['center'],
+                size=size,
+                mode='bilinear',
+                align_corners=self.align_corners,
+                warning=False)
+            seg_logit['offset'] = resize(
+                seg_logit['offset'],
                 size=size,
                 mode='bilinear',
                 align_corners=self.align_corners,
@@ -248,6 +271,7 @@ class EncoderDecoder(BaseSegmentor):
             Tensor: The output segmentation map.
         """
 
+        output = OrderedDict()
         assert self.test_cfg.mode in ['slide', 'whole']
         ori_shape = img_meta[0]['ori_shape']
         assert all(_['ori_shape'] == ori_shape for _ in img_meta)
@@ -255,30 +279,42 @@ class EncoderDecoder(BaseSegmentor):
             seg_logit = self.slide_inference(img, img_meta, rescale)
         else:
             seg_logit = self.whole_inference(img, img_meta, rescale)
-        output = F.softmax(seg_logit, dim=1)
+        output['semantic'] = F.softmax(seg_logit['semantic'], dim=1)
+        output['center'] = seg_logit['center']
+        output['offset'] = seg_logit['offset']
         flip = img_meta[0]['flip']
         if flip:
             flip_direction = img_meta[0]['flip_direction']
             assert flip_direction in ['horizontal', 'vertical']
             if flip_direction == 'horizontal':
-                output = output.flip(dims=(3, ))
+                output['semantic'] = output['semantic'].flip(dims=(3, ))
+                output['center'] = output['center'].flip(dims=(3, ))
+                output['offset'] = output['offset'].flip(dims=(3, ))
             elif flip_direction == 'vertical':
-                output = output.flip(dims=(2, ))
+                output['semantic'] = output['semantic'].flip(dims=(2, ))
+                output['center'] = output['center'].flip(dims=(2, ))
+                output['offset'] = output['offset'].flip(dims=(2, ))
 
         return output
 
     def simple_test(self, img, img_meta, rescale=True):
         """Simple test with single image."""
         seg_logit = self.inference(img, img_meta, rescale)
-        seg_pred = seg_logit.argmax(dim=1)
+        seg_pred = seg_logit['semantic']
         if torch.onnx.is_in_onnx_export():
             # our inference backend only support 4D output
             seg_pred = seg_pred.unsqueeze(0)
             return seg_pred
         seg_pred = seg_pred.cpu().numpy()
+        center_pred = seg_logit['center']
+        offset_pred = seg_logit['offset']
+        center_pred = center_pred.cpu().numpy()
+        offset_pred = offset_pred.cpu().numpy()
         # unravel batch dim
         seg_pred = list(seg_pred)
-        return seg_pred
+        center_pred = list(center_pred)
+        offset_pred = list(offset_pred)
+        return seg_pred, center_pred, offset_pred
 
     def aug_test(self, imgs, img_metas, rescale=True):
         """Test with augmentations.

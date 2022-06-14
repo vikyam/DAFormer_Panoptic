@@ -262,6 +262,7 @@ class BaseSegmentor(BaseModule, metaclass=ABCMeta):
         img = mmcv.imread(img)
         img = img.copy()
         seg = result[0]
+        seg = torch.from_numpy(seg).argmax(dim = 0).cpu().numpy()
         if palette is None:
             if self.PALETTE is None:
                 palette = np.random.randint(

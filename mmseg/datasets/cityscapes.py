@@ -124,7 +124,9 @@ class CityscapesDataset(CustomDataset):
         return result_files, tmp_dir
 
     def evaluate(self,
-                 results,
+                 results_sem,
+                 results_center,
+                 results_offset,
                  metric='mIoU',
                  logger=None,
                  imgfile_prefix=None,
@@ -154,12 +156,13 @@ class CityscapesDataset(CustomDataset):
         metrics = metric.copy() if isinstance(metric, list) else [metric]
         if 'cityscapes' in metrics:
             eval_results.update(
-                self._evaluate_cityscapes(results, logger, imgfile_prefix))
+                self._evaluate_cityscapes(results_sem, logger, imgfile_prefix))
             metrics.remove('cityscapes')
         if len(metrics) > 0:
             eval_results.update(
                 super(CityscapesDataset,
-                      self).evaluate(results, metrics, logger, efficient_test))
+                      self).evaluate(results_sem, results_center,
+                            results_offset, metrics, logger, efficient_test))
 
         return eval_results
 
